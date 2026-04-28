@@ -331,10 +331,27 @@ def _load_docker_client():
 
 
 def _http_probe(url: str, timeout: int = 3) -> tuple[Optional[bool], str]:
+    import urllib.parse
     import urllib.request
 
     try:
-        req = urllib.request.Request(url, method="GET")
+        parsed = urllib.parse.urlsplit(url)
+        netloc = parsed.hostname or ""
+        if parsed.port:
+            netloc = f"{netloc}:{parsed.port}"
+        probe_url = urllib.parse.urlunsplit((
+            parsed.scheme,
+            netloc,
+            parsed.path or "/",
+            parsed.query,
+            parsed.fragment,
+        ))
+        req = urllib.request.Request(probe_url, method="GET")
+        if parsed.username is not None:
+            username = urllib.parse.unquote(parsed.username)
+            password = urllib.parse.unquote(parsed.password or "")
+            basic_token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+            req.add_header("Authorization", f"Basic {basic_token}")
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return True, f"HTTP {response.status}"
     except Exception as exc:
