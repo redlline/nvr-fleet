@@ -6,8 +6,13 @@ __pycache__
 *.db
 *.log
 *.err.log
+.pytest_cache
+.mypy_cache
 backups
 addons/mtx-toolkit
+installcmd-smoke-*
+system-smoke-*
+tls-smoke-*
 admin-ui/node_modules
 admin-ui/dist
 admin-ui/.npm-cache
