@@ -1,3 +1,5 @@
+<img width="196" height="150" alt="tcp_proxy_architecture" src="https://github.com/user-attachments/assets/40bc021e-456b-4599-a07c-8d66d17f6a06" />
+<img width="2125" height="1625" alt="tcp_proxy_architecture" src="https://github.com/user-attachments/assets/762f7d18-bfd9-4d15-88af-0a483624d307" />
 
 # NVR Fleet
 
