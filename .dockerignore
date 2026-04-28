@@ -1,0 +1,16 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.db
+*.log
+*.err.log
+backups
+addons/mtx-toolkit
+admin-ui/node_modules
+admin-ui/dist
+admin-ui/.npm-cache
+fleet-server/__pycache__
+fleet-agent/__pycache__
+nginx/certs/*.pem
