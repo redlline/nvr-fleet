@@ -4,6 +4,7 @@ import { api } from "../lib/api"
 export default function System() {
   const [tls, setTls] = useState(null)
   const [stack, setStack] = useState(null)
+  const [backupList, setBackupList] = useState({ items: [], keep: 10, directory: "" })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
@@ -11,6 +12,11 @@ export default function System() {
   const [stackBusy, setStackBusy] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupFile, setBackupFile] = useState(null)
+  const [backupKeep, setBackupKeep] = useState("10")
+  const [logsService, setLogsService] = useState("")
+  const [logsTail, setLogsTail] = useState("200")
+  const [logsText, setLogsText] = useState("")
+  const [logsBusy, setLogsBusy] = useState(false)
   const [form, setForm] = useState({
     fullchain_pem: "",
     privkey_pem: "",
@@ -20,12 +26,18 @@ export default function System() {
     try {
       setLoading(true)
       setError("")
-      const [tlsStatus, stackStatus] = await Promise.all([
+      const [tlsStatus, stackStatus, backups] = await Promise.all([
         api.getTlsStatus(),
         api.getStackStatus(),
+        api.listRotatedBackups(),
       ])
       setTls(tlsStatus)
       setStack(stackStatus)
+      setBackupList(backups)
+      setBackupKeep(String(backups.keep || 10))
+      if (!logsService && stackStatus.services?.length) {
+        setLogsService(stackStatus.services[0].key)
+      }
     } catch (e) {
       console.error(e)
       setError(e.message)
@@ -45,6 +57,17 @@ export default function System() {
   async function loadPemFromFile(key, file) {
     if (!file) return
     updateField(key, await file.text())
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
   }
 
   async function saveTls(e) {
@@ -99,21 +122,65 @@ export default function System() {
     }
   }
 
+  async function loadLogs(serviceOverride) {
+    const serviceKey = serviceOverride || logsService
+    if (!serviceKey) return
+    setLogsBusy(true)
+    setError("")
+    try {
+      const result = await api.getStackLogs(serviceKey, parseInt(logsTail, 10) || 200)
+      setLogsService(result.service)
+      setLogsText(result.text || "")
+    } catch (e) {
+      console.error(e)
+      setError(e.message)
+    } finally {
+      setLogsBusy(false)
+    }
+  }
+
   async function exportBackup() {
     setBackupBusy(true)
     setError("")
     setMessage("")
     try {
       const blob = await api.exportBackup()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `nvr-fleet-backup-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.zip`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      downloadBlob(blob, `nvr-fleet-backup-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.zip`)
       setMessage("Backup exported.")
+    } catch (e) {
+      console.error(e)
+      setError(e.message)
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function rotateBackup() {
+    setBackupBusy(true)
+    setError("")
+    setMessage("")
+    try {
+      const keep = parseInt(backupKeep, 10) || backupList.keep || 10
+      const result = await api.rotateBackup({ keep })
+      const removed = result.removed?.length ? ` Removed: ${result.removed.join(", ")}` : ""
+      setMessage((result.message || "Backup stored on server.") + removed)
+      const next = await api.listRotatedBackups()
+      setBackupList(next)
+      setBackupKeep(String(next.keep || keep))
+    } catch (e) {
+      console.error(e)
+      setError(e.message)
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function downloadRotatedBackup(filename) {
+    setBackupBusy(true)
+    setError("")
+    try {
+      const blob = await api.downloadRotatedBackup(filename)
+      downloadBlob(blob, filename)
     } catch (e) {
       console.error(e)
       setError(e.message)
@@ -150,7 +217,7 @@ export default function System() {
       <div className="page-header">
         <div>
           <div className="page-title">System</div>
-          <div className="page-sub">TLS, stack control and backups without SSH</div>
+          <div className="page-sub">TLS, stack control, logs and backups without SSH</div>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={load}>Refresh</button>
       </div>
@@ -243,7 +310,7 @@ export default function System() {
           <button className="btn btn-ghost btn-sm" onClick={() => restartServices(["nginx", "admin-ui", "fleet-server"], "web services")} disabled={stackBusy || !stack?.docker_available}>
             Restart web layer
           </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => restartServices(["mediamtx", "mtx-toolkit"], "media services")} disabled={stackBusy || !stack?.docker_available}>
+          <button className="btn btn-ghost btn-sm" onClick={() => restartServices(["mediamtx", "mtx-toolkit-ui", "mtx-toolkit-api", "mtx-toolkit-worker", "mtx-toolkit-beat"], "media services")} disabled={stackBusy || !stack?.docker_available}>
             Restart media layer
           </button>
         </div>
@@ -280,19 +347,99 @@ export default function System() {
         </div>
       </Section>
 
+      <Section title="Logs">
+        <div className="form-row" style={{ alignItems: "end" }}>
+          <div className="form-group">
+            <label className="form-label">Service</label>
+            <select className="form-input" value={logsService} onChange={(e) => setLogsService(e.target.value)}>
+              {(stack?.services || []).map((service) => (
+                <option key={service.key} value={service.key}>{service.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group" style={{ maxWidth: 180 }}>
+            <label className="form-label">Tail lines</label>
+            <input className="form-input" type="number" min="20" max="2000" value={logsTail} onChange={(e) => setLogsTail(e.target.value)} />
+          </div>
+          <div className="form-group" style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={() => loadLogs()} disabled={logsBusy || !stack?.docker_available}>
+              {logsBusy ? <><span className="spinner" /> Loading...</> : "Load logs"}
+            </button>
+          </div>
+        </div>
+        <pre
+          style={{
+            margin: 0,
+            minHeight: 280,
+            maxHeight: 520,
+            overflow: "auto",
+            background: "#0b1220",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            padding: 14,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            fontSize: 12,
+          }}
+        >
+          {logsText || "No logs loaded yet."}
+        </pre>
+      </Section>
+
       <Section title="Backups">
         <div className="alert alert-info">
           Export includes sites, cameras, agent tokens and TLS files. Import replaces the current configuration and redeploys the restored sites.
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
           <button className="btn btn-primary btn-sm" onClick={exportBackup} disabled={backupBusy}>
             {backupBusy ? <><span className="spinner" /> Working...</> : "Export backup"}
+          </button>
+          <input className="form-input" style={{ maxWidth: 120 }} type="number" min="1" max="100" value={backupKeep} onChange={(e) => setBackupKeep(e.target.value)} />
+          <button className="btn btn-ghost btn-sm" onClick={rotateBackup} disabled={backupBusy}>
+            Rotate backup on server
           </button>
           <input className="form-input" style={{ maxWidth: 360 }} type="file" accept=".zip" onChange={(e) => setBackupFile(e.target.files?.[0] || null)} />
           <button className="btn btn-ghost btn-sm" onClick={importBackup} disabled={backupBusy || !backupFile}>
             Import backup
           </button>
+        </div>
+
+        <div style={{ color: "var(--text2)", fontSize: 12, marginBottom: 10 }}>
+          Server backup directory: <code>{backupList.directory || "-"}</code>
+        </div>
+
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Filename</th>
+                <th>Created</th>
+                <th>Size</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {(backupList.items || []).length ? (
+                backupList.items.map((item) => (
+                  <tr key={item.filename}>
+                    <td><code>{item.filename}</code></td>
+                    <td>{new Date(item.created_at).toLocaleString()}</td>
+                    <td>{formatBytes(item.size_bytes)}</td>
+                    <td>
+                      <button className="btn btn-ghost btn-sm" onClick={() => downloadRotatedBackup(item.filename)} disabled={backupBusy}>
+                        Download
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="4" style={{ color: "var(--text2)" }}>No rotated backups on server yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </Section>
     </div>
@@ -325,4 +472,16 @@ function Badge({ state }) {
       ? "badge-amber"
       : "badge-red"
   return <span className={`badge ${variant}`}>{state}</span>
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return "0 B"
+  const units = ["B", "KB", "MB", "GB", "TB"]
+  let value = bytes
+  let index = 0
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index += 1
+  }
+  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }

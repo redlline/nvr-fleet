@@ -18,7 +18,7 @@ from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, status, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -34,7 +34,9 @@ from schemas import (
     AgentCameraSyncItem,
     TlsUpdateRequest, TlsStatus, TlsCertificateInfo,
     StackStatus, StackServiceStatus, StackRestartRequest, StackRestartResult,
-    BackupImportResult,
+    StackLogsOut,
+    BackupFileOut, BackupListOut, BackupRotateRequest, BackupRotateResult, BackupImportResult,
+    SiteAgentDrainResult,
 )
 from config_gen import (
     generate_go2rtc_yaml,
@@ -203,6 +205,9 @@ def _tls_status_payload() -> TlsStatus:
 
 BACKUP_VERSION = 1
 DOCKER_SOCKET_PATH = os.environ.get("DOCKER_SOCKET_PATH", "/var/run/docker.sock")
+BACKUP_ROTATE_DIR = os.environ.get("BACKUP_ROTATE_DIR", "/app/backups")
+BACKUP_ROTATE_KEEP = int(os.environ.get("BACKUP_ROTATE_KEEP", "10"))
+BACKUP_ROTATE_PREFIX = "nvr-fleet-backup-"
 STACK_SERVICE_SPECS = [
     {
         "key": "nginx",
@@ -233,25 +238,46 @@ STACK_SERVICE_SPECS = [
         "probe_target": MEDIAMTX_API,
     },
     {
-        "key": "mtx-toolkit",
-        "label": "MTX Toolkit",
-        "container_name": "mtx-toolkit",
+        "key": "mtx-toolkit-ui",
+        "label": "MTX Toolkit UI",
+        "container_name": "mtx-toolkit-frontend",
         "probe_kind": "http",
-        "probe_target": "http://mtx-toolkit:3001/",
+        "probe_target": "http://host.docker.internal:3001/",
     },
     {
-        "key": "mtx-postgres",
-        "label": "MTX Postgres",
-        "container_name": "mtx-postgres",
-        "probe_kind": "tcp",
-        "probe_target": ("mtx-postgres", 5432),
+        "key": "mtx-toolkit-api",
+        "label": "MTX Toolkit API",
+        "container_name": "mtx-toolkit-backend",
+        "probe_kind": "http",
+        "probe_target": "http://host.docker.internal:5002/",
     },
     {
-        "key": "mtx-redis",
-        "label": "MTX Redis",
-        "container_name": "mtx-redis",
+        "key": "mtx-toolkit-worker",
+        "label": "MTX Toolkit Worker",
+        "container_name": "mtx-toolkit-celery-worker",
+        "probe_kind": "",
+        "probe_target": "",
+    },
+    {
+        "key": "mtx-toolkit-beat",
+        "label": "MTX Toolkit Beat",
+        "container_name": "mtx-toolkit-celery-beat",
+        "probe_kind": "",
+        "probe_target": "",
+    },
+    {
+        "key": "mtx-toolkit-postgres",
+        "label": "MTX Toolkit Postgres",
+        "container_name": "mtx-toolkit-postgres",
         "probe_kind": "tcp",
-        "probe_target": ("mtx-redis", 6379),
+        "probe_target": ("host.docker.internal", 15433),
+    },
+    {
+        "key": "mtx-toolkit-redis",
+        "label": "MTX Toolkit Redis",
+        "container_name": "mtx-toolkit-redis",
+        "probe_kind": "tcp",
+        "probe_target": ("host.docker.internal", 6380),
     },
 ]
 STACK_SERVICE_BY_KEY = {item["key"]: item for item in STACK_SERVICE_SPECS}
@@ -411,6 +437,36 @@ def _restart_stack_services_now(service_keys: list[str]) -> tuple[list[str], lis
     return restarted, skipped
 
 
+def _stack_logs_payload(service_key: str, tail: int) -> StackLogsOut:
+    spec = STACK_SERVICE_BY_KEY.get(service_key)
+    if spec is None:
+        raise HTTPException(404, "Unknown service")
+
+    client, docker_message = _load_docker_client()
+    if client is None:
+        raise HTTPException(503, docker_message)
+
+    try:
+        container = client.containers.get(spec["container_name"])
+        raw = container.logs(
+            tail=max(1, min(int(tail), 2000)),
+            stdout=True,
+            stderr=True,
+            timestamps=True,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Cannot read logs for {service_key}: {exc}") from exc
+    finally:
+        client.close()
+
+    return StackLogsOut(
+        service=service_key,
+        container_name=spec["container_name"],
+        tail=max(1, min(int(tail), 2000)),
+        text=raw.decode("utf-8", errors="replace"),
+    )
+
+
 def _schedule_self_restart() -> None:
     try:
         client, docker_message = _load_docker_client()
@@ -500,6 +556,69 @@ def _backup_zip_bytes(db: Session) -> bytes:
         if os.path.exists(TLS_PRIVKEY_PATH):
             archive.writestr("tls/privkey.pem", Path(TLS_PRIVKEY_PATH).read_text(encoding="utf-8"))
     return buffer.getvalue()
+
+
+def _normalized_backup_keep(keep: Optional[int] = None) -> int:
+    value = BACKUP_ROTATE_KEEP if keep is None else int(keep)
+    return max(1, min(value, 100))
+
+
+def _ensure_backup_rotate_dir() -> Path:
+    path = Path(BACKUP_ROTATE_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _backup_file_out(path: Path) -> BackupFileOut:
+    stat = path.stat()
+    return BackupFileOut(
+        filename=path.name,
+        size_bytes=stat.st_size,
+        created_at=datetime.utcfromtimestamp(stat.st_mtime),
+    )
+
+
+def _list_rotated_backup_paths() -> list[Path]:
+    base_dir = _ensure_backup_rotate_dir()
+    items = [path for path in base_dir.glob(f"{BACKUP_ROTATE_PREFIX}*.zip") if path.is_file()]
+    items.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+    return items
+
+
+def _list_rotated_backups() -> list[BackupFileOut]:
+    return [_backup_file_out(path) for path in _list_rotated_backup_paths()]
+
+
+def _write_rotated_backup(db: Session, keep: Optional[int] = None) -> tuple[BackupFileOut, list[str], int]:
+    target_dir = _ensure_backup_rotate_dir()
+    keep_count = _normalized_backup_keep(keep)
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    filename = f"{BACKUP_ROTATE_PREFIX}{timestamp}.zip"
+    path = target_dir / filename
+    if path.exists():
+        path = target_dir / f"{BACKUP_ROTATE_PREFIX}{timestamp}-{secrets.token_hex(2)}.zip"
+    path.write_bytes(_backup_zip_bytes(db))
+
+    removed = []
+    for old_path in _list_rotated_backup_paths()[keep_count:]:
+        try:
+            old_name = old_path.name
+            old_path.unlink(missing_ok=True)
+            removed.append(old_name)
+        except OSError:
+            continue
+
+    return _backup_file_out(path), removed, keep_count
+
+
+def _resolve_backup_file(filename: str) -> Path:
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or not safe_name.startswith(BACKUP_ROTATE_PREFIX) or not safe_name.endswith(".zip"):
+        raise HTTPException(404, "Backup file not found")
+    path = _ensure_backup_rotate_dir() / safe_name
+    if not path.exists() or not path.is_file():
+        raise HTTPException(404, "Backup file not found")
+    return path
 
 
 def _load_backup_archive(raw_bytes: bytes) -> tuple[dict, Optional[str], Optional[str]]:
@@ -1480,6 +1599,11 @@ def get_stack_status(_=Depends(require_admin)):
     return _stack_status_payload()
 
 
+@app.get("/api/system/stack/logs", response_model=StackLogsOut)
+def get_stack_logs(service: str, tail: int = 200, _=Depends(require_admin)):
+    return _stack_logs_payload(service, tail)
+
+
 @app.post("/api/system/stack/restart", response_model=StackRestartResult)
 def restart_stack_services(
     data: StackRestartRequest,
@@ -1516,6 +1640,33 @@ def export_backup(db: Session = Depends(get_db), _=Depends(require_admin)):
     filename = f"nvr-fleet-backup-{timestamp}.zip"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return StreamingResponse(io.BytesIO(payload), media_type="application/zip", headers=headers)
+
+
+@app.get("/api/system/backup/list", response_model=BackupListOut)
+def list_rotated_backups(_=Depends(require_admin)):
+    return BackupListOut(
+        directory=BACKUP_ROTATE_DIR,
+        keep=_normalized_backup_keep(),
+        items=_list_rotated_backups(),
+    )
+
+
+@app.post("/api/system/backup/rotate", response_model=BackupRotateResult)
+def rotate_backup(data: Optional[BackupRotateRequest] = None, db: Session = Depends(get_db), _=Depends(require_admin)):
+    keep = data.keep if data else None
+    created, removed, keep_count = _write_rotated_backup(db, keep)
+    return BackupRotateResult(
+        created=created,
+        removed=removed,
+        kept=keep_count,
+        message=f"Backup stored on server as {created.filename}",
+    )
+
+
+@app.get("/api/system/backup/files/{filename}")
+def download_rotated_backup(filename: str, _=Depends(require_admin)):
+    path = _resolve_backup_file(filename)
+    return FileResponse(path, media_type="application/zip", filename=path.name)
 
 
 @app.post("/api/system/backup/import", response_model=BackupImportResult)
@@ -1596,6 +1747,19 @@ async def restart_agent(site_id: str, db: Session = Depends(get_db), _=Depends(r
     _ensure_site_exists(site_id, db)
     sent = await send_to_agent(site_id, {"action": "restart"})
     return {"sent": sent}
+
+
+@app.post("/api/sites/{site_id}/drain-redeploy", response_model=SiteAgentDrainResult)
+async def drain_redeploy_site(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    _ensure_site_exists(site_id, db)
+    await call_agent(site_id, {"action": "drain"}, timeout=30)
+    deployed = await _deploy_config(site_id, db)
+    return SiteAgentDrainResult(
+        site_id=site_id,
+        drained=True,
+        deployed=deployed,
+        message="Agent drained and fresh config redeployed",
+    )
 
 
 # ─── Map ─────────────────────────────────────────────────────────────────────

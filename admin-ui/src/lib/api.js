@@ -82,13 +82,18 @@ export const api = {
 
   deploySite: (siteId) => req("POST", `/api/sites/${siteId}/deploy`),
   restartAgent: (siteId) => req("POST", `/api/sites/${siteId}/restart`),
+  drainRedeploySite: (siteId) => req("POST", `/api/sites/${siteId}/drain-redeploy`),
 
   getTlsStatus: () => req("GET", "/api/system/tls"),
   updateTls: (data) => req("PUT", "/api/system/tls", data),
   deleteTls: () => req("DELETE", "/api/system/tls"),
   getStackStatus: () => req("GET", "/api/system/stack"),
+  getStackLogs: (service, tail = 200) => req("GET", `/api/system/stack/logs?service=${encodeURIComponent(service)}&tail=${tail}`),
   restartStack: (data) => req("POST", "/api/system/stack/restart", data),
   exportBackup: () => downloadFile("/api/system/backup/export"),
+  listRotatedBackups: () => req("GET", "/api/system/backup/list"),
+  rotateBackup: (data = {}) => req("POST", "/api/system/backup/rotate", data),
+  downloadRotatedBackup: (filename) => downloadFile(`/api/system/backup/files/${encodeURIComponent(filename)}`),
   importBackup: (file) => uploadFile("/api/system/backup/import", file),
 
   mapData: () => req("GET", "/api/map"),

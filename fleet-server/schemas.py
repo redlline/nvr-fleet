@@ -225,9 +225,46 @@ class StackRestartResult(BaseModel):
     message: str = ""
 
 
+class StackLogsOut(BaseModel):
+    service: str
+    container_name: str
+    tail: int
+    text: str
+
+
+class BackupFileOut(BaseModel):
+    filename: str
+    size_bytes: int
+    created_at: datetime
+
+
+class BackupListOut(BaseModel):
+    directory: str
+    keep: int
+    items: list[BackupFileOut]
+
+
+class BackupRotateRequest(BaseModel):
+    keep: Optional[int] = None
+
+
+class BackupRotateResult(BaseModel):
+    created: BackupFileOut
+    removed: list[str]
+    kept: int
+    message: str = ""
+
+
 class BackupImportResult(BaseModel):
     imported_sites: int
     imported_cameras: int
     imported_agents: int
     restored_tls: bool
+    message: str = ""
+
+
+class SiteAgentDrainResult(BaseModel):
+    site_id: str
+    drained: bool
+    deployed: bool
     message: str = ""

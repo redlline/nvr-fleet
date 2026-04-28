@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+admin-ui/node_modules/
+admin-ui/.npm-cache/
+admin-ui/dist/
+backups/
+*.db
+*.log
+*.err.log
+nginx/certs/*.pem
+addons/mtx-toolkit/

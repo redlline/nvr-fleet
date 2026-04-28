@@ -1714,6 +1714,17 @@ async def handle_message(ws: websockets.WebSocketClientProtocol, msg: dict):
                 await send_reply(ws, request_id, ok=True)
             return
 
+        if action == "drain":
+            for stream_name in list(_ffmpeg_procs):
+                stop_publisher(stream_name)
+            for session_id in list(_archive_sessions):
+                stop_archive_session(session_id)
+            await close_all_tcp_tunnels()
+            await ws_send(ws, {"type": "stream_status", "streams": publisher_status()})
+            if request_id:
+                await send_reply(ws, request_id, ok=True)
+            return
+
         if action == "shutdown":
             for stream_name in list(_ffmpeg_procs):
                 stop_publisher(stream_name)

@@ -48,6 +48,20 @@ export default function SiteDetail({ siteId, navigate }) {
     setTimeout(() => setActionMsg(""), 4000)
   }
 
+  async function handleDrainRedeploy() {
+    if (!confirm("Drain active streams, archive sessions and tunnels, then redeploy config?")) return
+    setActionMsg("")
+    try {
+      const result = await api.drainRedeploySite(siteId)
+      setActionMsg(result.message || "Agent drained and config redeployed")
+      await load()
+    } catch (err) {
+      setActionMsg(err.message)
+    } finally {
+      setTimeout(() => setActionMsg(""), 5000)
+    }
+  }
+
   async function handleSaveEdit(form) {
     await api.updateSite(siteId, form)
     setShowEdit(false)
@@ -71,8 +85,8 @@ export default function SiteDetail({ siteId, navigate }) {
             </span>
           </div>
           <div className="page-sub">
-            {site.city && <>{site.city} · </>}
-            {site.nvr_vendor} · NVR RTSP: {site.nvr_ip}:{site.nvr_port} · API: {site.nvr_http_port} · Control: {site.nvr_control_port} · {site.channel_count} channels · stream: {site.stream_type}
+            {site.city && <>{site.city} | </>}
+            {site.nvr_vendor} | NVR RTSP: {site.nvr_ip}:{site.nvr_port} | API: {site.nvr_http_port} | Control: {site.nvr_control_port} | {site.channel_count} channels | stream: {site.stream_type}
           </div>
           {site.agent_last_seen && (
             <div style={{ color: "var(--text2)", fontSize: 12, marginTop: 4 }}>
@@ -83,6 +97,7 @@ export default function SiteDetail({ siteId, navigate }) {
         <div className="btn-group" style={{ flexShrink: 0 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowEdit(true)}>Edit</button>
           <button className="btn btn-ghost btn-sm" onClick={handleDeploy}>Deploy config</button>
+          <button className="btn btn-ghost btn-sm" onClick={handleDrainRedeploy}>Drain + redeploy</button>
           <button className="btn btn-ghost btn-sm" onClick={handleRestart}>Restart agent</button>
         </div>
       </div>

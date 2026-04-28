@@ -59,6 +59,7 @@ services:
     volumes:
       - ./fleet.db:/app/fleet.db
       - ./mediamtx:/app/mediamtx
+      - ./backups:/app/backups
       - ./nginx/certs:/app/tls
       - /var/run/docker.sock:/var/run/docker.sock
       - /run/systemd/private:/run/systemd/private
@@ -82,46 +83,3 @@ services:
     logging:
       driver: "json-file"
       options: { max-size: "5m", max-file: "2" }
-
-  mtx-toolkit:
-    image: ghcr.io/dan246/mtx-toolkit:latest
-    container_name: mtx-toolkit
-    restart: unless-stopped
-    ports:
-      - "3001:3001"
-    environment:
-      MEDIAMTX_API_URL: "http://host.docker.internal:9997"
-      MEDIAMTX_RTSP_URL: "rtsp://host.docker.internal:8554"
-      DATABASE_URL: "postgresql://mtx:mtxpass@mtx-postgres:5432/mtx_toolkit"
-      REDIS_URL: "redis://mtx-redis:6379/0"
-      RECORDING_BASE_PATH: "/recordings"
-    volumes:
-      - /var/recordings:/recordings
-    depends_on:
-      - mtx-postgres
-      - mtx-redis
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  mtx-postgres:
-    image: postgres:15-alpine
-    container_name: mtx-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: mtx
-      POSTGRES_PASSWORD: mtxpass
-      POSTGRES_DB: mtx_toolkit
-    volumes:
-      - mtx_pg_data:/var/lib/postgresql/data
-    ports:
-      - "15433:5432"
-
-  mtx-redis:
-    image: redis:7-alpine
-    container_name: mtx-redis
-    restart: unless-stopped
-    ports:
-      - "6380:6379"
-
-volumes:
-  mtx_pg_data:

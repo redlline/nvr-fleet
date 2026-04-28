@@ -1,0 +1,99 @@
+services:
+  mtx-toolkit-backend:
+    build:
+      context: ./addons/mtx-toolkit/backend
+      dockerfile: Dockerfile
+    container_name: mtx-toolkit-backend
+    restart: unless-stopped
+    ports:
+      - "5002:5000"
+    environment:
+      FLASK_ENV: production
+      DATABASE_URL: postgresql://mtx:mtx_password@mtx-toolkit-postgres:5432/mtx_toolkit
+      REDIS_URL: redis://mtx-toolkit-redis:6379/0
+      MEDIAMTX_API_URL: http://host.docker.internal:9997
+      MEDIAMTX_RTSP_URL: rtsp://host.docker.internal:8554
+      RECORDING_BASE_PATH: /recordings
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/recordings:/recordings
+    depends_on:
+      - mtx-toolkit-postgres
+      - mtx-toolkit-redis
+
+  mtx-toolkit-frontend:
+    build:
+      context: ./addons/mtx-toolkit/frontend
+      dockerfile: Dockerfile
+    container_name: mtx-toolkit-frontend
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - mtx-toolkit-backend
+
+  mtx-toolkit-postgres:
+    image: postgres:16-alpine
+    container_name: mtx-toolkit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mtx
+      POSTGRES_PASSWORD: mtx_password
+      POSTGRES_DB: mtx_toolkit
+    ports:
+      - "15433:5432"
+    volumes:
+      - mtx_toolkit_pg_data:/var/lib/postgresql/data
+
+  mtx-toolkit-redis:
+    image: redis:7-alpine
+    container_name: mtx-toolkit-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - mtx_toolkit_redis_data:/data
+
+  mtx-toolkit-celery-worker:
+    build:
+      context: ./addons/mtx-toolkit/backend
+      dockerfile: Dockerfile
+    container_name: mtx-toolkit-celery-worker
+    restart: unless-stopped
+    command: celery -A app.celery_app worker --loglevel=info
+    environment:
+      FLASK_ENV: production
+      DATABASE_URL: postgresql://mtx:mtx_password@mtx-toolkit-postgres:5432/mtx_toolkit
+      REDIS_URL: redis://mtx-toolkit-redis:6379/0
+      MEDIAMTX_API_URL: http://host.docker.internal:9997
+      MEDIAMTX_RTSP_URL: rtsp://host.docker.internal:8554
+      RECORDING_BASE_PATH: /recordings
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/recordings:/recordings
+    depends_on:
+      - mtx-toolkit-postgres
+      - mtx-toolkit-redis
+
+  mtx-toolkit-celery-beat:
+    build:
+      context: ./addons/mtx-toolkit/backend
+      dockerfile: Dockerfile
+    container_name: mtx-toolkit-celery-beat
+    restart: unless-stopped
+    command: celery -A app.celery_app beat --loglevel=info
+    environment:
+      FLASK_ENV: production
+      DATABASE_URL: postgresql://mtx:mtx_password@mtx-toolkit-postgres:5432/mtx_toolkit
+      REDIS_URL: redis://mtx-toolkit-redis:6379/0
+    depends_on:
+      - mtx-toolkit-postgres
+      - mtx-toolkit-redis
+
+volumes:
+  mtx_toolkit_pg_data:
+  mtx_toolkit_redis_data:
