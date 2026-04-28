@@ -9,6 +9,7 @@ __pycache__
 .pytest_cache
 .mypy_cache
 backups
+data
 addons/mtx-toolkit
 installcmd-smoke-*
 system-smoke-*

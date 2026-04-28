@@ -107,6 +107,7 @@ ufw allow 28000:28099/tcp
 git clone https://github.com/redlline/NVR-Fleet /opt/nvr-fleet
 cd /opt/nvr-fleet
 cp .env.example .env
+mkdir -p data backups nginx/certs
 ```
 
 Минимум, что нужно заполнить:
@@ -134,6 +135,14 @@ cp /path/to/privkey.pem nginx/certs/privkey.pem
 ```bash
 docker compose up -d --build
 docker compose ps
+```
+
+Если ты обновляешь старую установку, где база лежала как `./fleet.db`, перед запуском перенеси её:
+
+```bash
+mkdir -p data
+if [ -f fleet.db ]; then mv fleet.db data/fleet.db; fi
+if [ -d fleet.db ]; then rm -rf fleet.db; fi
 ```
 
 После этого интерфейс будет доступен по адресу:

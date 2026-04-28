@@ -43,6 +43,7 @@ services:
       - "28000-28099:28000-28099"
     environment:
       ADMIN_TOKEN: ${ADMIN_TOKEN:-change-me-now}
+      DATABASE_URL: "sqlite:////app/data/fleet.db"
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
       RTSP_PORT: "8554"
       MEDIAMTX_API: "http://host.docker.internal:9997"
@@ -57,7 +58,7 @@ services:
       TLS_FULLCHAIN_PATH: "/app/tls/fullchain.pem"
       TLS_PRIVKEY_PATH: "/app/tls/privkey.pem"
     volumes:
-      - ./fleet.db:/app/fleet.db
+      - ./data:/app/data
       - ./mediamtx:/app/mediamtx
       - ./backups:/app/backups
       - ./nginx/certs:/app/tls
