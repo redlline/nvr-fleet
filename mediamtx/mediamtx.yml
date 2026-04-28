@@ -26,7 +26,7 @@ logLevel: info
 metrics: true
 metricsAddress: :9998
 paths: {}
-protocols:
+rtspTransports:
 - tcp
 rtsp: true
 rtspAddress: :8554

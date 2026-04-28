@@ -31,7 +31,7 @@ from schemas import (
     AgentOut, StreamStatOut, TrafficOut,
     InstallResponse, DashboardStats,
     ArchiveRecordingOut, ArchivePlaybackRequest, ArchivePlaybackOut,
-    AgentCameraSyncItem,
+    AgentCameraSyncItem, AgentSiteConfigUpdate,
     TlsUpdateRequest, TlsStatus, TlsCertificateInfo,
     StackStatus, StackServiceStatus, StackRestartRequest, StackRestartResult,
     StackLogsOut,
@@ -405,6 +405,11 @@ def _stack_status_payload() -> StackStatus:
                 attrs = container.attrs.get("State", {})
                 status_text = attrs.get("Status", "unknown")
                 health_text = attrs.get("Health", {}).get("Status", "unknown")
+                if health_text == "unknown":
+                    if probe_ok is True:
+                        health_text = "reachable"
+                    elif probe_ok is False:
+                        health_text = "unreachable"
         else:
             if probe_ok is True:
                 status_text = "running"
@@ -813,6 +818,8 @@ class SiteTunnelManager:
     def _specs_for_sites(self, sites: list[Site]) -> dict[tuple[str, str], dict]:
         specs = {}
         for site in sites:
+            if not _site_is_configured(site):
+                continue
             specs[(site.id, "http")] = {
                 "site_id": site.id,
                 "protocol": "http",
@@ -965,6 +972,7 @@ def _build_site_out(site: Site, db: Session) -> SiteOut:
     _ensure_site_defaults(site, db)
     agent = db.query(Agent).filter_by(site_id=site.id).first()
     so = SiteOut.model_validate(site)
+    so.is_configured = _site_is_configured(site)
     so.agent_online = agent.online if agent else False
     so.agent_last_seen = agent.last_seen if agent else None
     so.camera_count = db.query(Camera).filter_by(site_id=site.id).count()
@@ -1008,6 +1016,37 @@ def _camera_stream_path(site_id: str, camera: Camera) -> str:
     return public_stream_path(site_id, camera.channel)
 
 
+def _site_is_configured(site: Site) -> bool:
+    return bool((site.nvr_ip or "").strip())
+
+
+def _normalize_text(value: Optional[str]) -> str:
+    return (value or "").strip()
+
+
+def _normalize_site_patch(payload: dict) -> dict:
+    normalized = dict(payload)
+    text_fields = {"name", "city", "nvr_vendor", "nvr_ip", "nvr_user", "nvr_pass", "stream_type"}
+    for key in text_fields:
+        if key in normalized and normalized[key] is not None:
+            normalized[key] = _normalize_text(normalized[key])
+
+    if "nvr_vendor" in normalized and normalized["nvr_vendor"]:
+        normalized["nvr_vendor"] = normalized["nvr_vendor"].lower()
+
+    if "nvr_http_port" in normalized and not normalized["nvr_http_port"]:
+        normalized["nvr_http_port"] = 80
+    if "nvr_port" in normalized and not normalized["nvr_port"]:
+        normalized["nvr_port"] = 554
+    if "nvr_control_port" in normalized and not normalized["nvr_control_port"]:
+        vendor = normalized.get("nvr_vendor", "hikvision")
+        normalized["nvr_control_port"] = _default_control_port(vendor)
+    if "channel_count" in normalized and normalized["channel_count"] is not None:
+        normalized["channel_count"] = max(0, int(normalized["channel_count"]))
+
+    return normalized
+
+
 def _ensure_site_exists(site_id: str, db: Session) -> Site:
     site = db.query(Site).filter_by(id=site_id).first()
     if not site:
@@ -1036,6 +1075,8 @@ def _site_payload(site: Site) -> dict:
         "name": site.name,
         "city": site.city,
         "vendor": site.nvr_vendor,
+        "channel_count": site.channel_count,
+        "is_configured": _site_is_configured(site),
         "nvr_ip": site.nvr_ip,
         "nvr_http_port": site.nvr_http_port,
         "nvr_control_port": site.nvr_control_port,
@@ -1208,28 +1249,31 @@ def list_sites(db: Session = Depends(get_db), _=Depends(require_admin)):
 
 @app.post("/api/sites", response_model=InstallResponse)
 async def create_site(data: SiteCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    payload = _normalize_site_patch(data.model_dump())
+    if not payload["name"]:
+        raise HTTPException(422, "Site name is required")
     site = Site(
-        name       = data.name,
-        city       = data.city,
+        name       = payload["name"],
+        city       = payload["city"],
         lat        = data.lat,
         lon        = data.lon,
-        nvr_vendor = data.nvr_vendor,
-        nvr_ip     = data.nvr_ip,
-        nvr_http_port = data.nvr_http_port,
-        nvr_control_port = data.nvr_control_port,
-        nvr_user   = data.nvr_user,
-        nvr_pass   = data.nvr_pass,
-        nvr_port   = data.nvr_port,
-        channel_count = data.channel_count,
-        stream_type   = data.stream_type,
+        nvr_vendor = payload["nvr_vendor"],
+        nvr_ip     = payload["nvr_ip"],
+        nvr_http_port = payload["nvr_http_port"],
+        nvr_control_port = payload["nvr_control_port"],
+        nvr_user   = payload["nvr_user"],
+        nvr_pass   = payload["nvr_pass"],
+        nvr_port   = payload["nvr_port"],
+        channel_count = payload["channel_count"],
+        stream_type   = payload["stream_type"],
         created_at    = datetime.utcnow(),
     )
     db.add(site)
     db.flush()
 
     # Auto-generate cameras
-    for ch in range(1, data.channel_count + 1):
-        subtype = 2 if data.stream_type == "sub" else 1
+    for ch in range(1, payload["channel_count"] + 1):
+        subtype = 2 if payload["stream_type"] == "sub" else 1
         channel_id = ch * 100 + subtype
         cam = Camera(
             site_id    = site.id,
@@ -1238,7 +1282,7 @@ async def create_site(data: SiteCreate, db: Session = Depends(get_db), _=Depends
             channel_id = channel_id,
             source_ref = None,
             profile_ref = None,
-            stream_type= data.stream_type,
+            stream_type= payload["stream_type"],
             enabled    = True,
         )
         db.add(cam)
@@ -1271,7 +1315,10 @@ def get_site(site_id: str, db: Session = Depends(get_db), _=Depends(require_admi
 @app.put("/api/sites/{site_id}", response_model=SiteOut)
 async def update_site(site_id: str, data: SiteUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
     site = _ensure_site_exists(site_id, db)
-    for k, v in data.model_dump(exclude_none=True).items():
+    payload = _normalize_site_patch(data.model_dump(exclude_none=True))
+    if "name" in payload and not payload["name"]:
+        raise HTTPException(422, "Site name is required")
+    for k, v in payload.items():
         setattr(site, k, v)
     _ensure_site_defaults(site, db)
     db.commit()
@@ -1457,6 +1504,27 @@ def get_agent_bundle(site_id: str, _=Depends(require_agent_site), db: Session = 
             "rtsp_port": site.tunnel_rtsp_port,
         },
     }
+
+
+@app.put("/api/agent/sites/{site_id}/site")
+async def update_agent_site_config(
+    site_id: str,
+    data: AgentSiteConfigUpdate,
+    _=Depends(require_agent_site),
+    db: Session = Depends(get_db),
+):
+    site = _ensure_site_exists(site_id, db)
+    payload = _normalize_site_patch(data.model_dump(exclude_none=True))
+    if "name" in payload and not payload["name"]:
+        raise HTTPException(422, "Site name is required")
+    for key, value in payload.items():
+        setattr(site, key, value)
+    _ensure_site_defaults(site, db)
+    db.commit()
+    db.refresh(site)
+    await _sync_tunnel_listeners(db)
+    await _deploy_config(site_id, db)
+    return {"status": "ok", "site": _site_payload(site)}
 
 
 @app.put("/api/agent/sites/{site_id}/cameras/replace")

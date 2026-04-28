@@ -17,7 +17,7 @@ class Site(Base):
     lat           = Column(Float, default=0.0)
     lon           = Column(Float, default=0.0)
     nvr_vendor    = Column(String, default="hikvision")
-    nvr_ip        = Column(String, nullable=False)
+    nvr_ip        = Column(String, nullable=False, default="")
     nvr_http_port = Column(Integer, default=80)
     nvr_control_port = Column(Integer, default=8000)
     nvr_user      = Column(String, default="admin")
@@ -26,7 +26,7 @@ class Site(Base):
     tunnel_http_port = Column(Integer, nullable=True)
     tunnel_control_port = Column(Integer, nullable=True)
     tunnel_rtsp_port = Column(Integer, nullable=True)
-    channel_count = Column(Integer, default=16)
+    channel_count = Column(Integer, default=0)
     stream_type   = Column(String, default="main")  # main | sub
     created_at    = Column(DateTime, default=datetime.utcnow)
     cameras       = relationship("Camera", back_populates="site", cascade="all, delete")

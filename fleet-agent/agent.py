@@ -26,7 +26,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import uvicorn
 import websockets
 import yaml
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -52,7 +52,7 @@ SERVER_RTSP_PORT = os.environ.get("SERVER_RTSP_PORT", "8554")
 AGENT_ADMIN_HOST = os.environ.get("AGENT_ADMIN_HOST", "0.0.0.0")
 AGENT_ADMIN_PORT = int(os.environ.get("AGENT_ADMIN_PORT", "7070"))
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 _ffmpeg_procs: dict[str, subprocess.Popen] = {}
 _publisher_targets: dict[str, str] = {}
@@ -89,6 +89,18 @@ class LocalCameraItem(BaseModel):
     enabled: bool = True
 
 
+class LocalSiteConfigItem(BaseModel):
+    nvr_vendor: str = "hikvision"
+    nvr_ip: str = ""
+    nvr_http_port: int = 80
+    nvr_control_port: int = 8000
+    nvr_user: str = "admin"
+    nvr_pass: str | None = None
+    nvr_port: int = 554
+    stream_type: str = "main"
+    channel_count: int | None = None
+
+
 LOCAL_ADMIN_HTML = """
 <!doctype html>
 <html>
@@ -103,7 +115,6 @@ LOCAL_ADMIN_HTML = """
     .sub { color: #94a3b8; margin-bottom: 24px; }
     .panel { background: #111827; border: 1px solid #334155; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
     .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-    .grow { flex: 1 1 240px; }
     .muted { color: #94a3b8; font-size: 13px; }
     button { background: #2563eb; color: white; border: 0; border-radius: 6px; padding: 10px 14px; cursor: pointer; }
     button.secondary { background: #334155; }
@@ -118,12 +129,17 @@ LOCAL_ADMIN_HTML = """
     .error { color: #fca5a5; }
     .pill { display: inline-block; border: 1px solid #334155; border-radius: 999px; padding: 4px 10px; margin-right: 8px; font-size: 12px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .field-label { display: block; margin-bottom: 6px; color: #94a3b8; font-size: 13px; }
+    .help { color: #94a3b8; font-size: 12px; margin-top: 6px; }
+    .hint { color: #fbbf24; font-size: 13px; margin-top: 6px; }
+    .device-row { padding: 10px 0; border-bottom: 1px solid #1e293b; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Local Agent Admin</h1>
-    <div class="sub">Manage channels from the mini-PC in the same LAN as the NVR.</div>
+    <div class="sub">Manage the NVR from the mini-PC in the same LAN. Configure it here first, then push the working config to the server.</div>
 
     <div class="panel">
       <div class="grid">
@@ -149,12 +165,62 @@ LOCAL_ADMIN_HTML = """
     <div class="panel">
       <div class="row">
         <button onclick="loadBundle()">Refresh</button>
+        <button onclick="saveSiteConfig()" id="saveSiteBtn">Save NVR settings</button>
         <button class="secondary" onclick="autoDiscover()">Autodiscover</button>
         <button class="secondary" onclick="discoverDevices()">Find NVRs in LAN</button>
         <button class="secondary" onclick="addRow()">Add camera</button>
-        <button onclick="saveRows()" id="saveBtn">Save changes</button>
+        <button onclick="saveRows()" id="saveBtn">Save cameras</button>
       </div>
       <div class="status" id="status"></div>
+    </div>
+
+    <div class="panel">
+      <div style="font-weight: 600; margin-bottom: 12px;">NVR settings</div>
+      <div class="help" style="margin-bottom: 12px;">
+        Recommended flow: find the NVR in LAN, apply it here, enter credentials, run Autodiscover, then save cameras.
+      </div>
+      <div class="grid-2">
+        <div>
+          <label class="field-label" for="nvrVendor">Archive adapter</label>
+          <select id="nvrVendor" onchange="updateSiteField('vendor', this.value)">
+            <option value="hikvision">Hikvision</option>
+            <option value="dahua">Dahua</option>
+            <option value="onvif">ONVIF</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="streamType">Default stream</label>
+          <select id="streamType" onchange="updateSiteField('stream_type', this.value)">
+            <option value="main">main</option>
+            <option value="sub">sub</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="nvrIp">NVR IP address</label>
+          <input id="nvrIp" placeholder="192.168.1.64" oninput="updateSiteField('nvr_ip', this.value)" />
+        </div>
+        <div>
+          <label class="field-label" for="nvrHttpPort">NVR API port</label>
+          <input id="nvrHttpPort" type="number" min="1" oninput="updateSiteField('nvr_http_port', this.value)" />
+        </div>
+        <div>
+          <label class="field-label" for="nvrControlPort">NVR control port</label>
+          <input id="nvrControlPort" type="number" min="1" oninput="updateSiteField('nvr_control_port', this.value)" />
+        </div>
+        <div>
+          <label class="field-label" for="nvrRtspPort">RTSP port</label>
+          <input id="nvrRtspPort" type="number" min="1" oninput="updateSiteField('nvr_port', this.value)" />
+        </div>
+        <div>
+          <label class="field-label" for="nvrUser">NVR username</label>
+          <input id="nvrUser" placeholder="admin" oninput="updateSiteField('nvr_user', this.value)" />
+        </div>
+        <div>
+          <label class="field-label" for="nvrPass">NVR password</label>
+          <input id="nvrPass" type="password" placeholder="Leave blank to keep current password" oninput="updateSiteField('nvr_pass', this.value)" />
+        </div>
+      </div>
+      <div id="nvrHint" class="help"></div>
     </div>
 
     <div class="panel">
@@ -183,6 +249,17 @@ LOCAL_ADMIN_HTML = """
     let bundle = null
     let rows = []
     let deviceRows = []
+    let siteForm = {
+      vendor: "hikvision",
+      nvr_ip: "",
+      nvr_http_port: 80,
+      nvr_control_port: 8000,
+      nvr_user: "admin",
+      nvr_pass: "",
+      nvr_port: 554,
+      stream_type: "main",
+      channel_count: 0,
+    }
 
     function setStatus(text, isError = false) {
       const node = document.getElementById("status")
@@ -190,10 +267,35 @@ LOCAL_ADMIN_HTML = """
       node.className = isError ? "status error" : "status"
     }
 
+    function defaultControlPort(vendor) {
+      return vendor === "dahua" ? 37777 : 8000
+    }
+
+    function syncChannelCount() {
+      siteForm.channel_count = rows.reduce((max, row) => Math.max(max, Number(row.channel) || 0), 0)
+    }
+
+    function populateSiteForm() {
+      if (!bundle) return
+      siteForm = {
+        vendor: bundle.site.vendor || "hikvision",
+        nvr_ip: bundle.site.nvr_ip || "",
+        nvr_http_port: Number(bundle.site.nvr_http_port) || 80,
+        nvr_control_port: Number(bundle.site.nvr_control_port) || defaultControlPort(bundle.site.vendor || "hikvision"),
+        nvr_user: bundle.site.nvr_user || "admin",
+        nvr_pass: "",
+        nvr_port: Number(bundle.site.nvr_port) || 554,
+        stream_type: bundle.site.stream_type || "main",
+        channel_count: Number(bundle.site.channel_count) || 0,
+      }
+    }
+
     function renderHeader() {
       if (!bundle) return
       document.getElementById("siteName").textContent = `${bundle.site.name || bundle.site.id} (${bundle.site.id})`
-      document.getElementById("nvrInfo").textContent = `${bundle.site.nvr_ip}:${bundle.site.nvr_port} / API ${bundle.site.nvr_http_port} / Control ${bundle.site.nvr_control_port}`
+      document.getElementById("nvrInfo").textContent = bundle.site.is_configured
+        ? `${bundle.site.vendor} / ${bundle.site.nvr_ip}:${bundle.site.nvr_port} / API ${bundle.site.nvr_http_port} / Control ${bundle.site.nvr_control_port}`
+        : "Pending local setup"
       document.getElementById("thickHost").textContent = bundle.thick_client.host
       document.getElementById("thickPorts").innerHTML = `
         <span class="pill">HTTP ${bundle.thick_client.http_port}</span>
@@ -202,12 +304,34 @@ LOCAL_ADMIN_HTML = """
       `
     }
 
+    function renderSiteConfig() {
+      document.getElementById("nvrVendor").value = siteForm.vendor || "hikvision"
+      document.getElementById("streamType").value = siteForm.stream_type || "main"
+      document.getElementById("nvrIp").value = siteForm.nvr_ip || ""
+      document.getElementById("nvrHttpPort").value = siteForm.nvr_http_port || 80
+      document.getElementById("nvrControlPort").value = siteForm.nvr_control_port || defaultControlPort(siteForm.vendor)
+      document.getElementById("nvrRtspPort").value = siteForm.nvr_port || 554
+      document.getElementById("nvrUser").value = siteForm.nvr_user || "admin"
+      document.getElementById("nvrPass").value = siteForm.nvr_pass || ""
+
+      const hint = document.getElementById("nvrHint")
+      if (siteForm.nvr_ip) {
+        hint.className = "help"
+        hint.textContent = `Saved target: ${siteForm.nvr_ip}:${siteForm.nvr_port} | current max channel: ${siteForm.channel_count || 0}`
+      } else {
+        hint.className = "hint"
+        hint.textContent = "NVR is not configured yet. Use 'Find NVRs in LAN' or enter the local IP manually on this mini-PC."
+      }
+    }
+
     function renderRows() {
       const body = document.getElementById("rows")
       body.innerHTML = ""
       rows.sort((a, b) => Number(a.channel) - Number(b.channel))
+      syncChannelCount()
       if (!rows.length) {
         body.innerHTML = '<tr><td colspan="6" class="muted">No cameras configured</td></tr>'
+        renderSiteConfig()
         return
       }
       rows.forEach((row, index) => {
@@ -230,6 +354,7 @@ LOCAL_ADMIN_HTML = """
         `
         body.appendChild(tr)
       })
+      renderSiteConfig()
     }
 
     function renderDevices() {
@@ -240,10 +365,13 @@ LOCAL_ADMIN_HTML = """
         return
       }
       node.className = ""
-      node.innerHTML = deviceRows.map((item) => `
-        <div style="padding: 8px 0; border-bottom: 1px solid #1e293b;">
+      node.innerHTML = deviceRows.map((item, index) => `
+        <div class="device-row">
           <div><strong>${escapeHtml(item.vendor || "onvif")}</strong> ${escapeHtml(item.ip || "-")} ${item.http_port ? ` / API ${escapeHtml(item.http_port)}` : ""}</div>
           <div class="muted">${escapeHtml(item.scopes || item.xaddrs || "WS-Discovery response")}</div>
+          <div style="margin-top: 8px;">
+            <button class="secondary" onclick="applyDevice(${index})">Use this device</button>
+          </div>
         </div>
       `).join("")
     }
@@ -254,10 +382,35 @@ LOCAL_ADMIN_HTML = """
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;")
     }
 
     function updateRow(index, key, value) {
       rows[index] = { ...rows[index], [key]: value }
+    }
+
+    function updateSiteField(key, value) {
+      const next = { ...siteForm, [key]: value }
+      const currentDefault = defaultControlPort(siteForm.vendor || "hikvision")
+      if (key === "vendor" && (!siteForm.nvr_control_port || Number(siteForm.nvr_control_port) === currentDefault)) {
+        next.nvr_control_port = defaultControlPort(value)
+      }
+      siteForm = next
+      renderSiteConfig()
+    }
+
+    function applyDevice(index) {
+      const device = deviceRows[index]
+      if (!device) return
+      siteForm = {
+        ...siteForm,
+        vendor: device.vendor || siteForm.vendor || "onvif",
+        nvr_ip: device.ip || siteForm.nvr_ip,
+        nvr_http_port: Number(device.http_port) || siteForm.nvr_http_port || 80,
+        nvr_control_port: defaultControlPort(device.vendor || siteForm.vendor || "onvif"),
+      }
+      renderSiteConfig()
+      setStatus(`Applied ${device.vendor || "ONVIF"} device ${device.ip} to NVR settings`)
     }
 
     function removeRow(index) {
@@ -273,7 +426,7 @@ LOCAL_ADMIN_HTML = """
         channel: maxChannel + 1,
         source_ref: null,
         profile_ref: null,
-        stream_type: "main",
+        stream_type: siteForm.stream_type || "main",
         enabled: true,
       })
       renderRows()
@@ -286,7 +439,9 @@ LOCAL_ADMIN_HTML = """
         bundle = await response.json()
         if (!response.ok) throw new Error(bundle.detail || "Failed to load")
         rows = bundle.cameras.map((camera) => ({ ...camera }))
+        populateSiteForm()
         renderHeader()
+        renderSiteConfig()
         renderRows()
         renderDevices()
         setStatus(`Loaded ${rows.length} cameras`)
@@ -296,9 +451,55 @@ LOCAL_ADMIN_HTML = """
       }
     }
 
-    async function autoDiscover() {
-      setStatus("Discovering channels on NVR...")
+    async function saveSiteConfig(showSuccess = true) {
+      const saveBtn = document.getElementById("saveSiteBtn")
+      saveBtn.disabled = true
+      if (showSuccess) setStatus("Saving NVR settings...")
       try {
+        syncChannelCount()
+        const payload = {
+          nvr_vendor: siteForm.vendor || "hikvision",
+          nvr_ip: (siteForm.nvr_ip || "").trim(),
+          nvr_http_port: Number(siteForm.nvr_http_port) || 80,
+          nvr_control_port: Number(siteForm.nvr_control_port) || defaultControlPort(siteForm.vendor || "hikvision"),
+          nvr_user: (siteForm.nvr_user || "admin").trim() || "admin",
+          nvr_port: Number(siteForm.nvr_port) || 554,
+          stream_type: siteForm.stream_type || "main",
+          channel_count: siteForm.channel_count || 0,
+        }
+        if ((siteForm.nvr_pass || "").trim()) {
+          payload.nvr_pass = siteForm.nvr_pass
+        }
+        const response = await fetch("/api/site", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.detail || "Save failed")
+        bundle.site = { ...bundle.site, ...data.site }
+        populateSiteForm()
+        renderHeader()
+        renderSiteConfig()
+        if (showSuccess) setStatus("NVR settings saved to server")
+        return data
+      } catch (error) {
+        console.error(error)
+        setStatus(error.message, true)
+        throw error
+      } finally {
+        saveBtn.disabled = false
+      }
+    }
+
+    async function autoDiscover() {
+      if (!(siteForm.nvr_ip || "").trim()) {
+        setStatus("Set the local NVR IP first, then run autodiscovery.", true)
+        return
+      }
+      setStatus("Saving NVR settings and discovering channels on NVR...")
+      try {
+        await saveSiteConfig(false)
         const response = await fetch("/api/discover")
         const data = await response.json()
         if (!response.ok) throw new Error(data.detail || "Discovery failed")
@@ -312,7 +513,7 @@ LOCAL_ADMIN_HTML = """
               channel: Number(item.channel),
               source_ref: item.source_ref || null,
               profile_ref: item.profile_ref || null,
-              stream_type: "main",
+              stream_type: siteForm.stream_type || "main",
               enabled: true,
             })
           } else {
@@ -349,6 +550,7 @@ LOCAL_ADMIN_HTML = """
       saveBtn.disabled = true
       setStatus("Saving...")
       try {
+        await saveSiteConfig(false)
         const payload = rows.map((row) => ({
           id: row.id || null,
           name: row.name,
@@ -367,7 +569,7 @@ LOCAL_ADMIN_HTML = """
         if (!response.ok) throw new Error(data.detail || "Save failed")
         rows = data.cameras.map((camera) => ({ ...camera }))
         renderRows()
-        setStatus("Configuration saved to server and deployed to agent")
+        setStatus("NVR settings and camera configuration saved to server")
       } catch (error) {
         console.error(error)
         setStatus(error.message, true)
@@ -1570,6 +1772,14 @@ def fetch_bundle():
     return server_api_request(f"/api/agent/sites/{SITE_ID}/bundle")
 
 
+def save_bundle_site(site_data: dict):
+    return server_api_request(
+        f"/api/agent/sites/{SITE_ID}/site",
+        method="PUT",
+        data=site_data,
+    )
+
+
 def save_bundle_cameras(cameras: list[dict]):
     return server_api_request(
         f"/api/agent/sites/{SITE_ID}/cameras/replace",
@@ -1663,9 +1873,19 @@ async def local_bundle():
     return await asyncio.to_thread(fetch_bundle)
 
 
+@local_app.put("/api/site")
+async def local_save_site(payload: LocalSiteConfigItem):
+    data = payload.model_dump()
+    if not (data.get("nvr_pass") or "").strip():
+        data.pop("nvr_pass", None)
+    return await asyncio.to_thread(save_bundle_site, data)
+
+
 @local_app.get("/api/discover")
 async def local_discover():
     bundle = await asyncio.to_thread(fetch_bundle)
+    if not (bundle.get("site", {}).get("nvr_ip") or "").strip():
+        raise HTTPException(400, "NVR IP is not configured yet")
     items = await asyncio.to_thread(discover_archive_channels, bundle["site"], bundle["cameras"])
     protocol = items[0].get("protocol") if items else None
     return {"items": items, "protocol": protocol}

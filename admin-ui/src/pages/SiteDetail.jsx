@@ -11,6 +11,22 @@ const VENDOR_OPTIONS = [
   { value: "onvif", label: "ONVIF" },
 ]
 
+function siteSummary(site) {
+  const parts = []
+  if (site.city) parts.push(site.city)
+  parts.push(site.nvr_vendor)
+  if (site.is_configured) {
+    parts.push(`NVR RTSP: ${site.nvr_ip}:${site.nvr_port}`)
+    parts.push(`API: ${site.nvr_http_port}`)
+    parts.push(`Control: ${site.nvr_control_port}`)
+  } else {
+    parts.push("NVR pending local setup")
+  }
+  parts.push(`${site.channel_count} channels`)
+  parts.push(`stream: ${site.stream_type}`)
+  return parts.join(" | ")
+}
+
 export default function SiteDetail({ siteId, navigate }) {
   const [site, setSite] = useState(null)
   const [tab, setTab] = useState("cameras")
@@ -71,6 +87,8 @@ export default function SiteDetail({ siteId, navigate }) {
   if (loading) return <div className="empty-state"><div className="spinner" /></div>
   if (!site) return <div className="empty-state">Site not found</div>
 
+  const isConfigured = site.is_configured
+
   return (
     <div>
       <button className="back-btn" onClick={() => navigate("sites")}>Back to sites</button>
@@ -83,11 +101,9 @@ export default function SiteDetail({ siteId, navigate }) {
               <span className={`dot ${site.agent_online ? "dot-green" : "dot-red"}`} />
               {site.agent_online ? "Online" : "Offline"}
             </span>
+            {!isConfigured && <span className="badge badge-gray">Draft</span>}
           </div>
-          <div className="page-sub">
-            {site.city && <>{site.city} | </>}
-            {site.nvr_vendor} | NVR RTSP: {site.nvr_ip}:{site.nvr_port} | API: {site.nvr_http_port} | Control: {site.nvr_control_port} | {site.channel_count} channels | stream: {site.stream_type}
-          </div>
+          <div className="page-sub">{siteSummary(site)}</div>
           {site.agent_last_seen && (
             <div style={{ color: "var(--text2)", fontSize: 12, marginTop: 4 }}>
               Last seen: {new Date(site.agent_last_seen).toLocaleString()}
@@ -109,13 +125,13 @@ export default function SiteDetail({ siteId, navigate }) {
           <div className="stat-value">{site.camera_count}</div>
           <div className="stat-label">Cameras</div>
         </div>
-        <div className="stat-card green">
+        <div className={`stat-card ${site.online_streams > 0 ? "green" : ""}`}>
           <div className="stat-value">{site.online_streams}</div>
           <div className="stat-label">Live streams</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-value" style={{ fontSize: 18 }}>{site.nvr_vendor}</div>
-          <div className="stat-label">Archive adapter</div>
+        <div className={`stat-card ${isConfigured ? "" : "amber"}`}>
+          <div className="stat-value" style={{ fontSize: 18 }}>{isConfigured ? site.nvr_vendor : "Draft"}</div>
+          <div className="stat-label">{isConfigured ? "Archive adapter" : "Onboarding state"}</div>
         </div>
         <div className="stat-card">
           <div className="stat-value" style={{ fontSize: 18 }}>{site.id}</div>
@@ -123,10 +139,28 @@ export default function SiteDetail({ siteId, navigate }) {
         </div>
       </div>
 
+      {!isConfigured && (
+        <div className="alert alert-info" style={{ marginBottom: 20 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Finish setup from the mini-PC in local LAN.</div>
+          <div style={{ color: "var(--text2)", fontSize: 13, lineHeight: 1.5 }}>
+            1. Install the agent on the mini-PC for this site.
+            <br />
+            2. Open the local panel on `http://MINI_PC_IP:7070`
+            <br />
+            3. Find the NVR in LAN or enter its local IP manually
+            <br />
+            4. Enter credentials, run autodiscovery, save cameras
+            <br />
+            5. The server will receive the NVR settings and activate live/archive for this site
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ padding: 16, marginBottom: 20 }}>
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Thick client tunnel</div>
         <div style={{ color: "var(--text2)", fontSize: 12, marginBottom: 10 }}>
-          Add the device in iVMS-4200 or a similar client using the public server host and these per-site ports.
+          Use the public server host and these per-site ports in iVMS-4200 or a similar client.
+          {!isConfigured && " The ports are already reserved; the actual NVR target becomes active after local setup on the mini-PC."}
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <span className="badge badge-gray">Host: {window.location.hostname}</span>
@@ -241,6 +275,9 @@ function EditSiteModal({ site, onClose, onSave }) {
               <input className="form-input" type="number" step="any" value={form.lon} onChange={(e) => upd("lon", e.target.value)} />
             </div>
           </div>
+          <div style={{ color: "var(--text2)", fontSize: 12, marginTop: -8, marginBottom: 14 }}>
+            Coordinates are optional and only used for the Network Map.
+          </div>
 
           <div className="form-row">
             <div className="form-group">
@@ -260,10 +297,14 @@ function EditSiteModal({ site, onClose, onSave }) {
             </div>
           </div>
 
+          <div className="alert alert-info" style={{ marginBottom: 16 }}>
+            You can leave NVR IP empty here and finish NVR setup from the mini-PC local panel later.
+          </div>
+
           <div className="form-row-3">
             <div className="form-group" style={{ gridColumn: "1/3" }}>
               <label className="form-label">NVR IP</label>
-              <input className="form-input" value={form.nvr_ip} onChange={(e) => upd("nvr_ip", e.target.value)} />
+              <input className="form-input" value={form.nvr_ip} onChange={(e) => upd("nvr_ip", e.target.value)} placeholder="Leave blank for local setup flow" />
             </div>
             <div className="form-group">
               <label className="form-label">RTSP port</label>

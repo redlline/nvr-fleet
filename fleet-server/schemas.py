@@ -9,13 +9,13 @@ class SiteCreate(BaseModel):
     lat: float = 0.0
     lon: float = 0.0
     nvr_vendor: str = "hikvision"
-    nvr_ip: str
+    nvr_ip: str = ""
     nvr_http_port: int = 80
     nvr_control_port: int = 8000
     nvr_user: str = "admin"
-    nvr_pass: str
+    nvr_pass: str = ""
     nvr_port: int = 554
-    channel_count: int = 16
+    channel_count: int = 0
     stream_type: str = "main"
 
 
@@ -53,6 +53,7 @@ class SiteOut(BaseModel):
     channel_count: int
     stream_type: str
     created_at: datetime
+    is_configured: bool = False
     agent_online: bool = False
     agent_last_seen: Optional[datetime] = None
     camera_count: int = 0
@@ -169,6 +170,18 @@ class AgentCameraSyncItem(BaseModel):
     profile_ref: Optional[str] = None
     stream_type: str = "main"
     enabled: bool = True
+
+
+class AgentSiteConfigUpdate(BaseModel):
+    nvr_vendor: Optional[str] = None
+    nvr_ip: Optional[str] = None
+    nvr_http_port: Optional[int] = None
+    nvr_control_port: Optional[int] = None
+    nvr_user: Optional[str] = None
+    nvr_pass: Optional[str] = None
+    nvr_port: Optional[int] = None
+    stream_type: Optional[str] = None
+    channel_count: Optional[int] = None
 
 
 class TlsUpdateRequest(BaseModel):

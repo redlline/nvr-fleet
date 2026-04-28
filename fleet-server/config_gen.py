@@ -53,6 +53,8 @@ def generate_go2rtc_yaml(site, cameras) -> str:
     for cam in cameras:
         if not cam.enabled:
             continue
+        if not (site.nvr_ip or "").strip():
+            continue
         stream_name = local_stream_name(site.id, cam.channel)
         nvr_user = quote(site.nvr_user, safe="")
         nvr_pass = quote(site.nvr_pass, safe="")
@@ -78,6 +80,11 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
             cfg = yaml.safe_load(f) or {}
     except FileNotFoundError:
         cfg = {}
+
+    if "protocols" in cfg and "rtspTransports" not in cfg:
+        cfg["rtspTransports"] = cfg.pop("protocols")
+    else:
+        cfg.pop("protocols", None)
 
     paths = cfg.get("paths", {}) or {}
 
