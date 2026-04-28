@@ -46,7 +46,9 @@ services:
       DATABASE_URL: "sqlite:////app/data/fleet.db"
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
       RTSP_PORT: "8554"
-      MEDIAMTX_API: "http://host.docker.internal:9997"
+      MEDIAMTX_API_USER: "mediamtx-internal"
+      MEDIAMTX_API_PASS: "MEDIAMTX_INTERNAL_PASS"
+      MEDIAMTX_API: "http://mediamtx-internal:MEDIAMTX_INTERNAL_PASS@host.docker.internal:9997"
       MEDIAMTX_YAML: "/app/mediamtx/mediamtx.yml"
       TUNNEL_HTTP_START: "20080"
       TUNNEL_HTTP_END: "20179"

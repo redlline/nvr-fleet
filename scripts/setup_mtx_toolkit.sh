@@ -16,6 +16,11 @@ else
   git -C "${ADDON_DIR}" pull --ff-only origin "${REPO_REF}"
 fi
 
+FRONTEND_NGINX_CONF="${ADDON_DIR}/frontend/nginx.conf"
+if [ -f "${FRONTEND_NGINX_CONF}" ]; then
+  sed -i 's/host\.docker\.internal:8893/host.docker.internal:8888/g' "${FRONTEND_NGINX_CONF}"
+fi
+
 echo "MTX Toolkit source is ready in: ${ADDON_DIR}"
 echo "Start add-on with:"
 echo "  docker compose -f docker-compose.mtx-toolkit.yml up -d --build"

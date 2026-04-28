@@ -1,6 +1,7 @@
 """
 Generates go2rtc.yaml for each site and updates mediamtx.yml paths section.
 """
+import os
 from pathlib import Path
 import re
 from urllib.parse import quote
@@ -26,6 +27,14 @@ def site_publish_user(site_id: str) -> str:
 
 def site_publish_pass(site_id: str) -> str:
     return f"PASS_{site_id}"
+
+
+def mediamtx_internal_api_user() -> str:
+    return os.environ.get("MEDIAMTX_API_USER", "mediamtx-internal")
+
+
+def mediamtx_internal_api_pass() -> str:
+    return os.environ.get("MEDIAMTX_API_PASS", "MEDIAMTX_INTERNAL_PASS")
 
 
 def normalize_stream_path(stream_name: str) -> str:
@@ -91,9 +100,9 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
             ],
         },
         {
-            "user": "any",
-            "pass": "",
-            "ips": ["127.0.0.1", "::1"],
+            "user": mediamtx_internal_api_user(),
+            "pass": mediamtx_internal_api_pass(),
+            "ips": [],
             "permissions": [
                 {"action": "api"},
                 {"action": "metrics"},
@@ -115,6 +124,18 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
     cfg["paths"] = paths
     cfg["authMethod"] = "internal"
     cfg["authInternalUsers"] = auth_users
+    cfg["api"] = True
+    cfg["apiAddress"] = ":9997"
+    cfg["metrics"] = True
+    cfg["metricsAddress"] = ":9998"
+
+    path_defaults = cfg.get("pathDefaults", {}) or {}
+    for legacy_key in ("publishUser", "publishPass", "publishIPs", "readUser", "readPass", "readIPs"):
+        path_defaults.pop(legacy_key, None)
+    if path_defaults:
+        cfg["pathDefaults"] = path_defaults
+    else:
+        cfg.pop("pathDefaults", None)
 
     Path(mediamtx_yml_path).parent.mkdir(parents=True, exist_ok=True)
     with open(mediamtx_yml_path, "w") as f:

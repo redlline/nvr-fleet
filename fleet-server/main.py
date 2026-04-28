@@ -235,7 +235,7 @@ STACK_SERVICE_SPECS = [
         "label": "MediaMTX",
         "container_name": "mediamtx",
         "probe_kind": "http",
-        "probe_target": MEDIAMTX_API,
+        "probe_target": f"{MEDIAMTX_API}/v3/paths/list",
     },
     {
         "key": "mtx-toolkit-ui",
@@ -249,7 +249,7 @@ STACK_SERVICE_SPECS = [
         "label": "MTX Toolkit API",
         "container_name": "mtx-toolkit-backend",
         "probe_kind": "http",
-        "probe_target": "http://host.docker.internal:5002/",
+        "probe_target": "http://host.docker.internal:5002/api/health/",
     },
     {
         "key": "mtx-toolkit-worker",
@@ -1058,6 +1058,7 @@ async def _sync_tunnel_listeners(db: Session) -> None:
 async def startup_event() -> None:
     db = SessionLocal()
     try:
+        _rebuild_mediamtx(db)
         await _sync_tunnel_listeners(db)
     finally:
         db.close()

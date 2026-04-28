@@ -1,5 +1,5 @@
 api: true
-apiAddress: 127.0.0.1:9997
+apiAddress: :9997
 authInternalUsers:
 - ips: []
   pass: VIEWER_PASS
@@ -8,20 +8,12 @@ authInternalUsers:
   - action: playback
   user: viewer
 - ips:
-  - 127.0.0.1
-  - ::1
-  pass: ''
+  pass: MEDIAMTX_INTERNAL_PASS
   permissions:
   - action: api
   - action: metrics
   - action: pprof
-  user: any
-- ips: []
-  pass: PASS_28b6e2e9
-  permissions:
-  - action: publish
-    path: ~^site28b6e2e9/.+$
-  user: site28b6e2e9
+  user: mediamtx-internal
 authMethod: internal
 hls: true
 hlsAddress: :8888
@@ -32,10 +24,7 @@ logDestinations:
 - stdout
 logLevel: info
 metrics: true
-metricsAddress: 127.0.0.1:9998
-pathDefaults:
-  readPass: VIEWER_PASS
-  readUser: viewer
+metricsAddress: :9998
 paths: {}
 protocols:
 - tcp
