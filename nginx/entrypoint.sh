@@ -48,7 +48,7 @@ server {
     }
 
     location /monitor/ {
-        proxy_pass http://mtx-toolkit:3001/;
+        proxy_pass http://host.docker.internal:3001/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -123,7 +123,7 @@ server {
     }
 
     location /monitor/ {
-        proxy_pass http://mtx-toolkit:3001/;
+        proxy_pass http://host.docker.internal:3001/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
