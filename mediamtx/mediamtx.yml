@@ -1,0 +1,45 @@
+api: true
+apiAddress: 127.0.0.1:9997
+authInternalUsers:
+- ips: []
+  pass: VIEWER_PASS
+  permissions:
+  - action: read
+  - action: playback
+  user: viewer
+- ips:
+  - 127.0.0.1
+  - ::1
+  pass: ''
+  permissions:
+  - action: api
+  - action: metrics
+  - action: pprof
+  user: any
+- ips: []
+  pass: PASS_28b6e2e9
+  permissions:
+  - action: publish
+    path: ~^site28b6e2e9/.+$
+  user: site28b6e2e9
+authMethod: internal
+hls: true
+hlsAddress: :8888
+hlsAlwaysRemux: true
+hlsSegmentCount: 3
+hlsSegmentDuration: 1s
+logDestinations:
+- stdout
+logLevel: info
+metrics: true
+metricsAddress: 127.0.0.1:9998
+pathDefaults:
+  readPass: VIEWER_PASS
+  readUser: viewer
+paths: {}
+protocols:
+- tcp
+rtsp: true
+rtspAddress: :8554
+webrtc: true
+webrtcAddress: :8889

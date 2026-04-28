@@ -1,0 +1,1678 @@
+import asyncio
+import base64
+import hashlib
+import io
+import json
+import logging
+import os
+import secrets
+import socket
+import ssl
+import subprocess
+import tempfile
+import uuid
+import zipfile
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, status, BackgroundTasks, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import inspect, text
+from sqlalchemy.orm import Session
+
+from database import SessionLocal, engine, Base
+from models import Site, Camera, Agent, StreamStat, TrafficSample
+from schemas import (
+    SiteCreate, SiteUpdate, SiteOut,
+    CameraCreate, CameraUpdate, CameraOut,
+    AgentOut, StreamStatOut, TrafficOut,
+    InstallResponse, DashboardStats,
+    ArchiveRecordingOut, ArchivePlaybackRequest, ArchivePlaybackOut,
+    AgentCameraSyncItem,
+    TlsUpdateRequest, TlsStatus, TlsCertificateInfo,
+    StackStatus, StackServiceStatus, StackRestartRequest, StackRestartResult,
+    BackupImportResult,
+)
+from config_gen import (
+    generate_go2rtc_yaml,
+    normalize_stream_path,
+    public_stream_path,
+    update_mediamtx_paths,
+)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def _ensure_db_schema() -> None:
+    Base.metadata.create_all(bind=engine)
+    insp = inspect(engine)
+    if "sites" not in insp.get_table_names():
+        return
+    columns = {col["name"] for col in insp.get_columns("sites")}
+    statements = []
+    if "nvr_vendor" not in columns:
+        statements.append("ALTER TABLE sites ADD COLUMN nvr_vendor VARCHAR DEFAULT 'hikvision'")
+    if "nvr_http_port" not in columns:
+        statements.append("ALTER TABLE sites ADD COLUMN nvr_http_port INTEGER DEFAULT 80")
+    if "nvr_control_port" not in columns:
+        statements.append("ALTER TABLE sites ADD COLUMN nvr_control_port INTEGER DEFAULT 8000")
+    if "tunnel_http_port" not in columns:
+        statements.append("ALTER TABLE sites ADD COLUMN tunnel_http_port INTEGER")
+    if "tunnel_control_port" not in columns:
+        statements.append("ALTER TABLE sites ADD COLUMN tunnel_control_port INTEGER")
+    if "tunnel_rtsp_port" not in columns:
+        statements.append("ALTER TABLE sites ADD COLUMN tunnel_rtsp_port INTEGER")
+    camera_columns = {col["name"] for col in insp.get_columns("cameras")} if "cameras" in insp.get_table_names() else set()
+    if "source_ref" not in camera_columns:
+        statements.append("ALTER TABLE cameras ADD COLUMN source_ref VARCHAR")
+    if "profile_ref" not in camera_columns:
+        statements.append("ALTER TABLE cameras ADD COLUMN profile_ref VARCHAR")
+    if not statements:
+        return
+    with engine.begin() as conn:
+        for stmt in statements:
+            conn.execute(text(stmt))
+
+
+_ensure_db_schema()
+
+app = FastAPI(title="NVR Fleet Server", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+security = HTTPBearer(auto_error=False)
+
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin-secret-change-me")
+MEDIAMTX_YAML = os.environ.get("MEDIAMTX_YAML", "/app/mediamtx.yml")
+MEDIAMTX_API  = os.environ.get("MEDIAMTX_API",  "http://localhost:9997")
+PUBLIC_HOST   = os.environ.get("PUBLIC_HOST",    "localhost")
+RTSP_PORT     = os.environ.get("RTSP_PORT",      "8554")
+TLS_CERT_DIR = os.environ.get("TLS_CERT_DIR", "/app/tls")
+TLS_FULLCHAIN_PATH = os.environ.get("TLS_FULLCHAIN_PATH", os.path.join(TLS_CERT_DIR, "fullchain.pem"))
+TLS_PRIVKEY_PATH = os.environ.get("TLS_PRIVKEY_PATH", os.path.join(TLS_CERT_DIR, "privkey.pem"))
+PUBLIC_WEB_SCHEME = os.environ.get("PUBLIC_WEB_SCHEME", "").strip().lower()
+TUNNEL_HTTP_START = int(os.environ.get("TUNNEL_HTTP_START", "20080"))
+TUNNEL_HTTP_END = int(os.environ.get("TUNNEL_HTTP_END", "20179"))
+TUNNEL_CONTROL_START = int(os.environ.get("TUNNEL_CONTROL_START", "28000"))
+TUNNEL_CONTROL_END = int(os.environ.get("TUNNEL_CONTROL_END", "28099"))
+TUNNEL_RTSP_START = int(os.environ.get("TUNNEL_RTSP_START", "25554"))
+TUNNEL_RTSP_END = int(os.environ.get("TUNNEL_RTSP_END", "25653"))
+
+# active agent WebSocket connections: site_id -> WebSocket
+active_agents: dict[str, WebSocket] = {}
+agent_send_locks: dict[str, asyncio.Lock] = {}
+pending_agent_requests: dict[str, tuple[str, asyncio.Future]] = {}
+# traffic accumulators: site_id -> bytes this minute
+traffic_acc:   dict[str, int] = {}
+APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _tls_files_present() -> bool:
+    return os.path.exists(TLS_FULLCHAIN_PATH) and os.path.exists(TLS_PRIVKEY_PATH)
+
+
+def _parse_cert_time(value: str) -> datetime:
+    normalized = " ".join(value.strip().split())
+    return datetime.strptime(normalized, "%b %d %H:%M:%S %Y %Z")
+
+
+def _load_tls_info_from_text(fullchain_pem: str, privkey_pem: str) -> TlsCertificateInfo:
+    cert_dir = Path(TLS_CERT_DIR)
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=cert_dir) as temp_dir:
+        cert_path = Path(temp_dir) / "fullchain.pem"
+        key_path = Path(temp_dir) / "privkey.pem"
+        cert_path.write_text(fullchain_pem, encoding="utf-8")
+        key_path.write_text(privkey_pem, encoding="utf-8")
+        ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(str(cert_path), str(key_path))
+        decoded = ssl._ssl._test_decode_cert(str(cert_path))
+
+    subject_items = []
+    for group in decoded.get("subject", []):
+        for key, value in group:
+            subject_items.append(f"{key}={value}")
+    issuer_items = []
+    for group in decoded.get("issuer", []):
+        for key, value in group:
+            issuer_items.append(f"{key}={value}")
+
+    not_before = _parse_cert_time(decoded["notBefore"])
+    not_after = _parse_cert_time(decoded["notAfter"])
+    der_bytes = ssl.PEM_cert_to_DER_cert(fullchain_pem)
+    fingerprint = hashlib.sha256(der_bytes).hexdigest()
+    san = [value for key, value in decoded.get("subjectAltName", []) if key == "DNS"]
+
+    return TlsCertificateInfo(
+        subject=", ".join(subject_items) or "Unknown",
+        issuer=", ".join(issuer_items) or "Unknown",
+        san=san,
+        not_before=not_before,
+        not_after=not_after,
+        expires_in_days=max((not_after - datetime.utcnow()).days, 0),
+        fingerprint_sha256=fingerprint,
+    )
+
+
+def _read_tls_info() -> Optional[TlsCertificateInfo]:
+    if not _tls_files_present():
+        return None
+    try:
+        fullchain_pem = Path(TLS_FULLCHAIN_PATH).read_text(encoding="utf-8")
+        privkey_pem = Path(TLS_PRIVKEY_PATH).read_text(encoding="utf-8")
+        return _load_tls_info_from_text(fullchain_pem, privkey_pem)
+    except Exception as exc:
+        logger.warning("TLS certificate files exist but are invalid: %s", exc)
+        return None
+
+
+def _public_scheme() -> str:
+    if PUBLIC_WEB_SCHEME in {"http", "https"}:
+        return PUBLIC_WEB_SCHEME
+    return "https" if _read_tls_info() else "http"
+
+
+def _public_base_url() -> str:
+    return f"{_public_scheme()}://{PUBLIC_HOST}"
+
+
+def _ws_scheme() -> str:
+    return "wss" if _public_scheme() == "https" else "ws"
+
+
+def _tls_status_payload() -> TlsStatus:
+    cert = _read_tls_info()
+    return TlsStatus(
+        enabled=cert is not None,
+        files_present=_tls_files_present(),
+        public_host=PUBLIC_HOST,
+        public_base_url=_public_base_url(),
+        install_script_url=f"{_public_base_url()}/install.sh",
+        cert=cert,
+    )
+
+
+BACKUP_VERSION = 1
+DOCKER_SOCKET_PATH = os.environ.get("DOCKER_SOCKET_PATH", "/var/run/docker.sock")
+STACK_SERVICE_SPECS = [
+    {
+        "key": "nginx",
+        "label": "Nginx",
+        "container_name": "nvr-nginx",
+        "probe_kind": "http",
+        "probe_target": "http://nginx/",
+    },
+    {
+        "key": "fleet-server",
+        "label": "Fleet Server",
+        "container_name": "fleet-server",
+        "probe_kind": "http",
+        "probe_target": "http://fleet-server:8765/install.sh",
+    },
+    {
+        "key": "admin-ui",
+        "label": "Admin UI",
+        "container_name": "nvr-admin-ui",
+        "probe_kind": "http",
+        "probe_target": "http://admin-ui/",
+    },
+    {
+        "key": "mediamtx",
+        "label": "MediaMTX",
+        "container_name": "mediamtx",
+        "probe_kind": "http",
+        "probe_target": MEDIAMTX_API,
+    },
+    {
+        "key": "mtx-toolkit",
+        "label": "MTX Toolkit",
+        "container_name": "mtx-toolkit",
+        "probe_kind": "http",
+        "probe_target": "http://mtx-toolkit:3001/",
+    },
+    {
+        "key": "mtx-postgres",
+        "label": "MTX Postgres",
+        "container_name": "mtx-postgres",
+        "probe_kind": "tcp",
+        "probe_target": ("mtx-postgres", 5432),
+    },
+    {
+        "key": "mtx-redis",
+        "label": "MTX Redis",
+        "container_name": "mtx-redis",
+        "probe_kind": "tcp",
+        "probe_target": ("mtx-redis", 6379),
+    },
+]
+STACK_SERVICE_BY_KEY = {item["key"]: item for item in STACK_SERVICE_SPECS}
+
+
+def _resolve_runtime_path(*candidate_paths: tuple[str, ...]) -> str:
+    candidates = []
+    for rel_parts in candidate_paths:
+        candidates.append(os.path.join(APP_ROOT, *rel_parts))
+        candidates.append(os.path.join(os.path.dirname(APP_ROOT), *rel_parts))
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+
+INSTALL_SCRIPT_PATH = _resolve_runtime_path(("scripts", "install.sh"))
+AGENT_SCRIPT_PATH = _resolve_runtime_path(
+    ("agent", "agent.py"),
+    ("fleet-agent", "agent.py"),
+)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def require_admin(creds: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    if not creds or creds.credentials != ADMIN_TOKEN:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    return creds.credentials
+
+
+def _load_docker_client():
+    if not os.path.exists(DOCKER_SOCKET_PATH):
+        return None, f"Docker socket is not mounted at {DOCKER_SOCKET_PATH}"
+    try:
+        import docker as docker_sdk
+    except ImportError:
+        return None, "docker SDK is not installed in fleet-server runtime"
+    try:
+        client = docker_sdk.DockerClient(base_url=f"unix://{DOCKER_SOCKET_PATH}")
+        client.ping()
+        return client, ""
+    except Exception as exc:
+        return None, f"Cannot connect to Docker daemon: {exc}"
+
+
+def _http_probe(url: str, timeout: int = 3) -> tuple[Optional[bool], str]:
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return True, f"HTTP {response.status}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _tcp_probe(host: str, port: int, timeout: int = 3) -> tuple[Optional[bool], str]:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True, "TCP connect ok"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _probe_service(spec: dict) -> tuple[Optional[bool], str]:
+    kind = spec.get("probe_kind")
+    target = spec.get("probe_target")
+    if kind == "http" and isinstance(target, str):
+        return _http_probe(target)
+    if kind == "tcp" and isinstance(target, tuple):
+        host, port = target
+        return _tcp_probe(host, int(port))
+    return None, ""
+
+
+def _stack_status_payload() -> StackStatus:
+    client, docker_message = _load_docker_client()
+    docker_available = client is not None
+    containers = {}
+    if client is not None:
+        try:
+            for container in client.containers.list(all=True):
+                containers[container.name] = container
+        except Exception as exc:
+            docker_available = False
+            docker_message = f"Cannot inspect Docker containers: {exc}"
+        finally:
+            client.close()
+
+    services = []
+    for spec in STACK_SERVICE_SPECS:
+        probe_ok, probe_message = _probe_service(spec)
+        status_text = "unknown"
+        health_text = "unknown"
+        if docker_available:
+            container = containers.get(spec["container_name"])
+            if container is None:
+                status_text = "missing"
+                health_text = "missing"
+            else:
+                attrs = container.attrs.get("State", {})
+                status_text = attrs.get("Status", "unknown")
+                health_text = attrs.get("Health", {}).get("Status", "unknown")
+        else:
+            if probe_ok is True:
+                status_text = "running"
+                health_text = "reachable"
+            elif probe_ok is False:
+                status_text = "unavailable"
+                health_text = "unreachable"
+
+        services.append(StackServiceStatus(
+            key=spec["key"],
+            label=spec["label"],
+            container_name=spec["container_name"],
+            status=status_text,
+            health=health_text,
+            probe_ok=probe_ok,
+            probe_message=probe_message,
+            restart_supported=docker_available,
+        ))
+
+    return StackStatus(
+        docker_available=docker_available,
+        docker_message=docker_message,
+        services=services,
+    )
+
+
+def _restart_stack_services_now(service_keys: list[str]) -> tuple[list[str], list[str]]:
+    client, docker_message = _load_docker_client()
+    if client is None:
+        raise HTTPException(503, docker_message)
+    restarted = []
+    skipped = []
+    try:
+        for key in service_keys:
+            spec = STACK_SERVICE_BY_KEY.get(key)
+            if spec is None:
+                skipped.append(key)
+                continue
+            try:
+                container = client.containers.get(spec["container_name"])
+                container.restart(timeout=10)
+                restarted.append(key)
+            except Exception as exc:
+                skipped.append(f"{key}: {exc}")
+    finally:
+        client.close()
+    return restarted, skipped
+
+
+def _schedule_self_restart() -> None:
+    try:
+        client, docker_message = _load_docker_client()
+        if client is None:
+            logger.warning("Cannot schedule fleet-server restart: %s", docker_message)
+            return
+        try:
+            container = client.containers.get("fleet-server")
+            container.restart(timeout=10)
+        finally:
+            client.close()
+    except Exception as exc:
+        logger.warning("fleet-server self-restart failed: %s", exc)
+
+
+def _serialize_site(site: Site) -> dict:
+    return {
+        "id": site.id,
+        "name": site.name,
+        "city": site.city,
+        "lat": site.lat,
+        "lon": site.lon,
+        "nvr_vendor": site.nvr_vendor,
+        "nvr_ip": site.nvr_ip,
+        "nvr_http_port": site.nvr_http_port,
+        "nvr_control_port": site.nvr_control_port,
+        "nvr_user": site.nvr_user,
+        "nvr_pass": site.nvr_pass,
+        "nvr_port": site.nvr_port,
+        "tunnel_http_port": site.tunnel_http_port,
+        "tunnel_control_port": site.tunnel_control_port,
+        "tunnel_rtsp_port": site.tunnel_rtsp_port,
+        "channel_count": site.channel_count,
+        "stream_type": site.stream_type,
+        "created_at": site.created_at.isoformat() if site.created_at else None,
+    }
+
+
+def _serialize_camera(camera: Camera) -> dict:
+    return {
+        "id": camera.id,
+        "site_id": camera.site_id,
+        "name": camera.name,
+        "channel": camera.channel,
+        "channel_id": camera.channel_id,
+        "source_ref": camera.source_ref,
+        "profile_ref": camera.profile_ref,
+        "stream_type": camera.stream_type,
+        "enabled": camera.enabled,
+    }
+
+
+def _serialize_agent(agent: Agent) -> dict:
+    return {
+        "site_id": agent.site_id,
+        "token": agent.token,
+        "version": agent.version,
+        "uptime": agent.uptime,
+    }
+
+
+def _parse_datetime_value(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(value)
+
+
+def _build_backup_payload(db: Session) -> dict:
+    return {
+        "version": BACKUP_VERSION,
+        "exported_at": datetime.utcnow().isoformat(),
+        "sites": [_serialize_site(site) for site in db.query(Site).order_by(Site.created_at, Site.id).all()],
+        "cameras": [_serialize_camera(camera) for camera in db.query(Camera).order_by(Camera.site_id, Camera.channel).all()],
+        "agents": [_serialize_agent(agent) for agent in db.query(Agent).order_by(Agent.site_id).all()],
+    }
+
+
+def _backup_zip_bytes(db: Session) -> bytes:
+    payload = _build_backup_payload(db)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("backup.json", json.dumps(payload, ensure_ascii=False, indent=2))
+        if os.path.exists(TLS_FULLCHAIN_PATH):
+            archive.writestr("tls/fullchain.pem", Path(TLS_FULLCHAIN_PATH).read_text(encoding="utf-8"))
+        if os.path.exists(TLS_PRIVKEY_PATH):
+            archive.writestr("tls/privkey.pem", Path(TLS_PRIVKEY_PATH).read_text(encoding="utf-8"))
+    return buffer.getvalue()
+
+
+def _load_backup_archive(raw_bytes: bytes) -> tuple[dict, Optional[str], Optional[str]]:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw_bytes), "r") as archive:
+            if "backup.json" not in archive.namelist():
+                raise HTTPException(400, "Backup archive must contain backup.json")
+            payload = json.loads(archive.read("backup.json").decode("utf-8"))
+            fullchain_pem = None
+            privkey_pem = None
+            if "tls/fullchain.pem" in archive.namelist():
+                fullchain_pem = archive.read("tls/fullchain.pem").decode("utf-8")
+            if "tls/privkey.pem" in archive.namelist():
+                privkey_pem = archive.read("tls/privkey.pem").decode("utf-8")
+            return payload, fullchain_pem, privkey_pem
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(400, "Backup file is not a valid ZIP archive") from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, "backup.json is not valid JSON") from exc
+
+
+def _restore_backup_payload(db: Session, payload: dict) -> tuple[int, int, int]:
+    _ensure_db_schema()
+    if int(payload.get("version", 0)) < 1:
+        raise HTTPException(400, "Unsupported backup version")
+
+    sites = payload.get("sites") or []
+    cameras = payload.get("cameras") or []
+    agents = payload.get("agents") or []
+
+    db.query(TrafficSample).delete()
+    db.query(StreamStat).delete()
+    db.query(Agent).delete()
+    db.query(Camera).delete()
+    db.query(Site).delete()
+    db.flush()
+
+    for item in sites:
+        db.add(Site(
+            id=item["id"],
+            name=item["name"],
+            city=item.get("city", ""),
+            lat=item.get("lat", 0.0),
+            lon=item.get("lon", 0.0),
+            nvr_vendor=item.get("nvr_vendor", "hikvision"),
+            nvr_ip=item["nvr_ip"],
+            nvr_http_port=item.get("nvr_http_port", 80),
+            nvr_control_port=item.get("nvr_control_port", _default_control_port(item.get("nvr_vendor", "hikvision"))),
+            nvr_user=item.get("nvr_user", "admin"),
+            nvr_pass=item.get("nvr_pass", ""),
+            nvr_port=item.get("nvr_port", 554),
+            tunnel_http_port=item.get("tunnel_http_port"),
+            tunnel_control_port=item.get("tunnel_control_port"),
+            tunnel_rtsp_port=item.get("tunnel_rtsp_port"),
+            channel_count=item.get("channel_count", 0),
+            stream_type=item.get("stream_type", "main"),
+            created_at=_parse_datetime_value(item.get("created_at")) or datetime.utcnow(),
+        ))
+    db.flush()
+
+    for item in cameras:
+        db.add(Camera(
+            id=item["id"],
+            site_id=item["site_id"],
+            name=item.get("name", ""),
+            channel=item["channel"],
+            channel_id=item.get("channel_id", _camera_channel_id(item["channel"], item.get("stream_type", "main"))),
+            source_ref=item.get("source_ref"),
+            profile_ref=item.get("profile_ref"),
+            stream_type=item.get("stream_type", "main"),
+            enabled=bool(item.get("enabled", True)),
+        ))
+
+    for item in agents:
+        db.add(Agent(
+            site_id=item["site_id"],
+            token=item["token"],
+            online=False,
+            last_seen=None,
+            version=item.get("version", ""),
+            uptime=0,
+        ))
+
+    _ensure_all_site_defaults(db)
+    db.flush()
+    return len(sites), len(cameras), len(agents)
+
+
+def _default_control_port(vendor: str) -> int:
+    vendor_name = (vendor or "hikvision").strip().lower()
+    if vendor_name == "dahua":
+        return 37777
+    return 8000
+
+
+def _allocate_site_port(
+    db: Session,
+    field_name: str,
+    start: int,
+    end: int,
+    *,
+    exclude_site_id: Optional[str] = None,
+) -> int:
+    sites = db.query(Site).all()
+    used = set()
+    for site in sites:
+        if exclude_site_id and site.id == exclude_site_id:
+            continue
+        value = getattr(site, field_name, None)
+        if value:
+            used.add(value)
+    for port in range(start, end + 1):
+        if port not in used:
+            return port
+    raise RuntimeError(f"No free ports left in range {start}-{end} for {field_name}")
+
+
+def _ensure_site_defaults(site: Site, db: Session) -> bool:
+    changed = False
+    if not site.nvr_vendor:
+        site.nvr_vendor = "hikvision"
+        changed = True
+    if not site.nvr_http_port:
+        site.nvr_http_port = 80
+        changed = True
+    if not site.nvr_control_port:
+        site.nvr_control_port = _default_control_port(site.nvr_vendor)
+        changed = True
+    if not site.tunnel_http_port:
+        site.tunnel_http_port = _allocate_site_port(
+            db, "tunnel_http_port", TUNNEL_HTTP_START, TUNNEL_HTTP_END, exclude_site_id=site.id
+        )
+        changed = True
+    if not site.tunnel_control_port:
+        site.tunnel_control_port = _allocate_site_port(
+            db, "tunnel_control_port", TUNNEL_CONTROL_START, TUNNEL_CONTROL_END, exclude_site_id=site.id
+        )
+        changed = True
+    if not site.tunnel_rtsp_port:
+        site.tunnel_rtsp_port = _allocate_site_port(
+            db, "tunnel_rtsp_port", TUNNEL_RTSP_START, TUNNEL_RTSP_END, exclude_site_id=site.id
+        )
+        changed = True
+    return changed
+
+
+def _ensure_all_site_defaults(db: Session) -> bool:
+    changed = False
+    for site in db.query(Site).all():
+        changed = _ensure_site_defaults(site, db) or changed
+    return changed
+
+
+def require_agent_site(
+    site_id: str,
+    x_agent_token: Optional[str] = Header(None, alias="X-Agent-Token"),
+    db: Session = Depends(get_db),
+) -> str:
+    if not x_agent_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing agent token")
+    agent = db.query(Agent).filter_by(site_id=site_id, token=x_agent_token).first()
+    if not agent:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token")
+    _ensure_site_exists(site_id, db)
+    return site_id
+
+
+class SiteTunnelManager:
+    def __init__(self) -> None:
+        self.listeners: dict[tuple[str, str], asyncio.AbstractServer] = {}
+        self.listener_specs: dict[tuple[str, str], dict] = {}
+        self.connections: dict[str, dict] = {}
+        self._lock = asyncio.Lock()
+
+    def _specs_for_sites(self, sites: list[Site]) -> dict[tuple[str, str], dict]:
+        specs = {}
+        for site in sites:
+            specs[(site.id, "http")] = {
+                "site_id": site.id,
+                "protocol": "http",
+                "public_port": site.tunnel_http_port,
+                "target_host": site.nvr_ip,
+                "target_port": site.nvr_http_port,
+            }
+            specs[(site.id, "control")] = {
+                "site_id": site.id,
+                "protocol": "control",
+                "public_port": site.tunnel_control_port,
+                "target_host": site.nvr_ip,
+                "target_port": site.nvr_control_port,
+            }
+            specs[(site.id, "rtsp")] = {
+                "site_id": site.id,
+                "protocol": "rtsp",
+                "public_port": site.tunnel_rtsp_port,
+                "target_host": site.nvr_ip,
+                "target_port": site.nvr_port,
+            }
+        return specs
+
+    async def sync(self, sites: list[Site]) -> None:
+        desired = self._specs_for_sites(sites)
+        async with self._lock:
+            current_keys = set(self.listeners)
+            desired_keys = set(desired)
+
+            for key in current_keys - desired_keys:
+                await self._close_listener(key)
+
+            for key in desired_keys:
+                spec = desired[key]
+                current_spec = self.listener_specs.get(key)
+                if current_spec == spec and key in self.listeners:
+                    continue
+                if key in self.listeners:
+                    await self._close_listener(key)
+                server = await asyncio.start_server(
+                    lambda reader, writer, spec=spec: self._handle_client(spec, reader, writer),
+                    host="0.0.0.0",
+                    port=spec["public_port"],
+                )
+                self.listeners[key] = server
+                self.listener_specs[key] = spec
+                logger.info(
+                    "Tunnel listener ready for site %s %s on port %s",
+                    spec["site_id"],
+                    spec["protocol"],
+                    spec["public_port"],
+                )
+
+    async def _close_listener(self, key: tuple[str, str]) -> None:
+        server = self.listeners.pop(key, None)
+        self.listener_specs.pop(key, None)
+        if server:
+            server.close()
+            await server.wait_closed()
+
+    async def _handle_client(self, spec: dict, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        site_id = spec["site_id"]
+        connection_id = uuid.uuid4().hex
+        peer = writer.get_extra_info("peername")
+        self.connections[connection_id] = {
+            "site_id": site_id,
+            "protocol": spec["protocol"],
+            "writer": writer,
+        }
+        opened = False
+        try:
+            await call_agent(site_id, {
+                "action": "tcp_open",
+                "connection_id": connection_id,
+                "protocol": spec["protocol"],
+                "target_host": spec["target_host"],
+                "target_port": spec["target_port"],
+                "peer": repr(peer),
+            }, timeout=15)
+            opened = True
+
+            while True:
+                data = await reader.read(65536)
+                if not data:
+                    break
+                sent = await send_to_agent(site_id, {
+                    "action": "tcp_data",
+                    "connection_id": connection_id,
+                    "data": base64.b64encode(data).decode("ascii"),
+                })
+                if not sent:
+                    break
+        except HTTPException:
+            pass
+        except Exception as exc:
+            logger.warning("Tunnel client %s/%s failed: %s", site_id, spec["protocol"], exc)
+        finally:
+            if opened:
+                await send_to_agent(site_id, {
+                    "action": "tcp_close",
+                    "connection_id": connection_id,
+                })
+            await self.close_connection(connection_id)
+
+    async def handle_agent_message(self, site_id: str, msg: dict) -> None:
+        connection_id = msg.get("connection_id")
+        if not connection_id:
+            return
+        entry = self.connections.get(connection_id)
+        if not entry or entry["site_id"] != site_id:
+            return
+        mtype = msg.get("type")
+        if mtype == "tcp_data":
+            writer = entry["writer"]
+            try:
+                writer.write(base64.b64decode(msg.get("data", "")))
+                await writer.drain()
+            except Exception:
+                await self.close_connection(connection_id)
+        elif mtype == "tcp_close":
+            await self.close_connection(connection_id)
+
+    async def close_connection(self, connection_id: str) -> None:
+        entry = self.connections.pop(connection_id, None)
+        if not entry:
+            return
+        writer = entry["writer"]
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+    async def close_site_connections(self, site_id: str) -> None:
+        for connection_id, entry in list(self.connections.items()):
+            if entry["site_id"] == site_id:
+                await self.close_connection(connection_id)
+
+    async def shutdown(self) -> None:
+        for connection_id in list(self.connections):
+            await self.close_connection(connection_id)
+        for key in list(self.listeners):
+            await self._close_listener(key)
+
+
+tunnel_manager = SiteTunnelManager()
+
+
+def _build_site_out(site: Site, db: Session) -> SiteOut:
+    _ensure_site_defaults(site, db)
+    agent = db.query(Agent).filter_by(site_id=site.id).first()
+    so = SiteOut.model_validate(site)
+    so.agent_online = agent.online if agent else False
+    so.agent_last_seen = agent.last_seen if agent else None
+    so.camera_count = db.query(Camera).filter_by(site_id=site.id).count()
+    so.online_streams = db.query(StreamStat).filter_by(site_id=site.id, ready=True).count()
+    return so
+
+
+def _update_stream_stats(site_id: str, streams: dict[str, bool], db: Session) -> None:
+    now = datetime.utcnow()
+    normalized = {normalize_stream_path(path): ready for path, ready in streams.items()}
+    existing = {
+        stat.stream_path: stat
+        for stat in db.query(StreamStat).filter_by(site_id=site_id).all()
+    }
+
+    for path, ready in normalized.items():
+        stat = existing.get(path)
+        if stat:
+            stat.ready = ready
+            stat.updated = now
+        else:
+            db.add(StreamStat(
+                site_id=site_id,
+                stream_path=path,
+                ready=ready,
+                updated=now,
+            ))
+
+    for path, stat in existing.items():
+        if path not in normalized:
+            stat.ready = False
+            stat.updated = now
+
+
+def _camera_channel_id(channel: int, stream_type: str) -> int:
+    subtype = 2 if stream_type == "sub" else 1
+    return channel * 100 + subtype
+
+
+def _camera_stream_path(site_id: str, camera: Camera) -> str:
+    return public_stream_path(site_id, camera.channel)
+
+
+def _ensure_site_exists(site_id: str, db: Session) -> Site:
+    site = db.query(Site).filter_by(id=site_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    return site
+
+
+def _ensure_unique_camera_channel(db: Session, site_id: str, channel: int, exclude_id: Optional[int] = None):
+    query = db.query(Camera).filter_by(site_id=site_id, channel=channel)
+    if exclude_id is not None:
+        query = query.filter(Camera.id != exclude_id)
+    if query.first():
+        raise HTTPException(409, f"Channel {channel} already exists")
+
+
+def _get_site_camera(db: Session, site_id: str, camera_id: int) -> Camera:
+    cam = db.query(Camera).filter_by(id=camera_id, site_id=site_id).first()
+    if not cam:
+        raise HTTPException(404, "Camera not found")
+    return cam
+
+
+def _site_payload(site: Site) -> dict:
+    return {
+        "id": site.id,
+        "name": site.name,
+        "city": site.city,
+        "vendor": site.nvr_vendor,
+        "nvr_ip": site.nvr_ip,
+        "nvr_http_port": site.nvr_http_port,
+        "nvr_control_port": site.nvr_control_port,
+        "nvr_user": site.nvr_user,
+        "nvr_pass": site.nvr_pass,
+        "nvr_port": site.nvr_port,
+        "public_host": PUBLIC_HOST,
+        "tunnel_http_port": site.tunnel_http_port,
+        "tunnel_control_port": site.tunnel_control_port,
+        "tunnel_rtsp_port": site.tunnel_rtsp_port,
+        "stream_type": site.stream_type,
+    }
+
+
+def _camera_payload(camera: Camera) -> dict:
+    return {
+        "id": camera.id,
+        "site_id": camera.site_id,
+        "name": camera.name,
+        "channel": camera.channel,
+        "channel_id": camera.channel_id,
+        "source_ref": camera.source_ref,
+        "profile_ref": camera.profile_ref,
+        "stream_type": camera.stream_type,
+        "enabled": camera.enabled,
+    }
+
+
+async def _sync_tunnel_listeners(db: Session) -> None:
+    if _ensure_all_site_defaults(db):
+        db.commit()
+    sites = db.query(Site).all()
+    await tunnel_manager.sync(sites)
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    db = SessionLocal()
+    try:
+        await _sync_tunnel_listeners(db)
+    finally:
+        db.close()
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    await tunnel_manager.shutdown()
+
+
+# ─── WebSocket: Agent ────────────────────────────────────────────────────────
+
+@app.websocket("/ws/agent/{site_id}")
+async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
+    token = ws.query_params.get("token", "")
+    agent = db.query(Agent).filter(Agent.site_id == site_id, Agent.token == token).first()
+    if not agent:
+        await ws.close(code=4403)
+        return
+
+    await ws.accept()
+    active_agents[site_id] = ws
+    agent_send_locks[site_id] = asyncio.Lock()
+    agent.online = True
+    agent.last_seen = datetime.utcnow()
+    db.commit()
+    logger.info(f"Agent connected: {site_id}")
+    await _deploy_config(site_id, db)
+
+    try:
+        async for raw in ws.iter_text():
+            msg = json.loads(raw)
+            mtype = msg.get("type")
+            reply_to = msg.get("reply_to")
+
+            if reply_to:
+                pending = pending_agent_requests.get(reply_to)
+                if pending:
+                    _, future = pending
+                    if not future.done():
+                        future.set_result(msg)
+                continue
+
+            if mtype == "heartbeat":
+                agent.last_seen = datetime.utcnow()
+                agent.version   = msg.get("version", "")
+                agent.uptime    = msg.get("uptime", 0)
+                db.commit()
+
+            elif mtype == "traffic":
+                # {"type":"traffic","streams":{"site1/cam01":{"rx":1024,"tx":2048}}}
+                for path, stats in msg.get("streams", {}).items():
+                    sample = TrafficSample(
+                        site_id=site_id,
+                        stream_path=path,
+                        rx_bytes=stats.get("rx", 0),
+                        tx_bytes=stats.get("tx", 0),
+                        ts=datetime.utcnow(),
+                    )
+                    db.add(sample)
+                db.commit()
+
+            elif mtype == "stream_status":
+                _update_stream_stats(site_id, msg.get("streams", {}), db)
+                db.commit()
+
+            elif mtype in {"tcp_data", "tcp_close"}:
+                await tunnel_manager.handle_agent_message(site_id, msg)
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        active_agents.pop(site_id, None)
+        agent_send_locks.pop(site_id, None)
+        agent.online = False
+        now = datetime.utcnow()
+        for stat in db.query(StreamStat).filter_by(site_id=site_id).all():
+            stat.ready = False
+            stat.updated = now
+        for request_id, pending in list(pending_agent_requests.items()):
+            pending_site_id, future = pending
+            if pending_site_id == site_id and not future.done():
+                future.set_result({"ok": False, "error": "Agent disconnected"})
+        await tunnel_manager.close_site_connections(site_id)
+        db.commit()
+        logger.info(f"Agent disconnected: {site_id}")
+
+
+async def send_to_agent(site_id: str, payload: dict) -> bool:
+    ws = active_agents.get(site_id)
+    if not ws:
+        return False
+    try:
+        lock = agent_send_locks.setdefault(site_id, asyncio.Lock())
+        async with lock:
+            await ws.send_text(json.dumps(payload))
+        return True
+    except Exception as e:
+        logger.warning(f"send_to_agent {site_id}: {e}")
+        return False
+
+
+async def call_agent(site_id: str, payload: dict, timeout: int = 20) -> dict:
+    request_id = uuid.uuid4().hex
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    pending_agent_requests[request_id] = (site_id, future)
+    sent = await send_to_agent(site_id, {**payload, "request_id": request_id})
+    if not sent:
+        pending_agent_requests.pop(request_id, None)
+        raise HTTPException(503, "Agent is offline")
+    try:
+        reply = await asyncio.wait_for(future, timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(504, "Agent request timed out") from exc
+    finally:
+        pending_agent_requests.pop(request_id, None)
+    if not reply.get("ok", False):
+        raise HTTPException(502, reply.get("error", "Agent request failed"))
+    return reply
+
+
+# ─── Sites ───────────────────────────────────────────────────────────────────
+
+@app.get("/api/sites", response_model=list[SiteOut])
+def list_sites(db: Session = Depends(get_db), _=Depends(require_admin)):
+    sites = db.query(Site).all()
+    return [_build_site_out(site, db) for site in sites]
+
+
+@app.post("/api/sites", response_model=InstallResponse)
+async def create_site(data: SiteCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    site = Site(
+        name       = data.name,
+        city       = data.city,
+        lat        = data.lat,
+        lon        = data.lon,
+        nvr_vendor = data.nvr_vendor,
+        nvr_ip     = data.nvr_ip,
+        nvr_http_port = data.nvr_http_port,
+        nvr_control_port = data.nvr_control_port,
+        nvr_user   = data.nvr_user,
+        nvr_pass   = data.nvr_pass,
+        nvr_port   = data.nvr_port,
+        channel_count = data.channel_count,
+        stream_type   = data.stream_type,
+        created_at    = datetime.utcnow(),
+    )
+    db.add(site)
+    db.flush()
+
+    # Auto-generate cameras
+    for ch in range(1, data.channel_count + 1):
+        subtype = 2 if data.stream_type == "sub" else 1
+        channel_id = ch * 100 + subtype
+        cam = Camera(
+            site_id    = site.id,
+            name       = f"Cam {ch:02d}",
+            channel    = ch,
+            channel_id = channel_id,
+            source_ref = None,
+            profile_ref = None,
+            stream_type= data.stream_type,
+            enabled    = True,
+        )
+        db.add(cam)
+
+    token = secrets.token_urlsafe(32)
+    agent = Agent(site_id=site.id, token=token, online=False)
+    db.add(agent)
+    _ensure_site_defaults(site, db)
+    db.commit()
+    db.refresh(site)
+
+    _rebuild_mediamtx(db)
+    await _sync_tunnel_listeners(db)
+
+    install_cmd = (
+        f"curl -fsSL {_public_base_url()}/install.sh | "
+        f"bash -s -- --site {site.id} --token {token} --server {PUBLIC_HOST} --scheme {_public_scheme()}"
+    )
+    return InstallResponse(site_id=site.id, token=token, install_cmd=install_cmd)
+
+
+@app.get("/api/sites/{site_id}", response_model=SiteOut)
+def get_site(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    site = db.query(Site).filter_by(id=site_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    return _build_site_out(site, db)
+
+
+@app.put("/api/sites/{site_id}", response_model=SiteOut)
+async def update_site(site_id: str, data: SiteUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    site = _ensure_site_exists(site_id, db)
+    for k, v in data.model_dump(exclude_none=True).items():
+        setattr(site, k, v)
+    _ensure_site_defaults(site, db)
+    db.commit()
+    db.refresh(site)
+    await _sync_tunnel_listeners(db)
+    await _deploy_config(site_id, db)
+    return _build_site_out(site, db)
+
+
+@app.delete("/api/sites/{site_id}")
+async def delete_site(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    site = db.query(Site).filter_by(id=site_id).first()
+    if not site:
+        raise HTTPException(404)
+    await send_to_agent(site_id, {"action": "shutdown"})
+    db.query(Camera).filter_by(site_id=site_id).delete()
+    db.query(Agent).filter_by(site_id=site_id).delete()
+    db.query(StreamStat).filter_by(site_id=site_id).delete()
+    db.query(TrafficSample).filter_by(site_id=site_id).delete()
+    db.delete(site)
+    db.commit()
+    _rebuild_mediamtx(db)
+    await _sync_tunnel_listeners(db)
+    return {"status": "deleted"}
+
+
+# ─── Cameras ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/sites/{site_id}/cameras", response_model=list[CameraOut])
+def list_cameras(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    _ensure_site_exists(site_id, db)
+    return db.query(Camera).filter_by(site_id=site_id).order_by(Camera.channel).all()
+
+
+@app.post("/api/sites/{site_id}/cameras", response_model=CameraOut)
+async def add_camera(site_id: str, data: CameraCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    _ensure_site_exists(site_id, db)
+    _ensure_unique_camera_channel(db, site_id, data.channel)
+    cam = Camera(
+        site_id=site_id,
+        name=data.name,
+        channel=data.channel,
+        channel_id=_camera_channel_id(data.channel, data.stream_type),
+        source_ref=data.source_ref,
+        profile_ref=data.profile_ref,
+        stream_type=data.stream_type,
+        enabled=data.enabled,
+    )
+    db.add(cam)
+    db.commit()
+    db.refresh(cam)
+    await _deploy_config(site_id, db)
+    return cam
+
+
+@app.put("/api/sites/{site_id}/cameras/{cam_id}", response_model=CameraOut)
+async def update_camera(site_id: str, cam_id: int, data: CameraUpdate,
+                        db: Session = Depends(get_db), _=Depends(require_admin)):
+    cam = db.query(Camera).filter_by(id=cam_id, site_id=site_id).first()
+    if not cam:
+        raise HTTPException(404)
+    next_channel = data.channel if data.channel is not None else cam.channel
+    next_stream_type = data.stream_type if data.stream_type is not None else cam.stream_type
+    if next_channel != cam.channel:
+        _ensure_unique_camera_channel(db, site_id, next_channel, exclude_id=cam.id)
+    for k, v in data.model_dump(exclude_none=True).items():
+        setattr(cam, k, v)
+    if data.channel is not None or data.stream_type is not None:
+        cam.channel_id = _camera_channel_id(next_channel, next_stream_type)
+    db.commit()
+    db.refresh(cam)
+    await _deploy_config(site_id, db)
+    return cam
+
+
+@app.delete("/api/sites/{site_id}/cameras/{cam_id}")
+async def delete_camera(site_id: str, cam_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+    cam = db.query(Camera).filter_by(id=cam_id, site_id=site_id).first()
+    if not cam:
+        raise HTTPException(404)
+    db.delete(cam)
+    db.commit()
+    await _deploy_config(site_id, db)
+    return {"status": "deleted"}
+
+
+@app.post("/api/sites/{site_id}/cameras/bulk")
+async def bulk_update_cameras(site_id: str, cameras: list[CameraUpdate],
+                               db: Session = Depends(get_db), _=Depends(require_admin)):
+    """Batch enable/disable/rename cameras"""
+    _ensure_site_exists(site_id, db)
+    existing = {
+        cam.id: cam
+        for cam in db.query(Camera).filter_by(site_id=site_id).all()
+    }
+    planned_channels = {cam.id: cam.channel for cam in existing.values()}
+
+    for upd in cameras:
+        if upd.id and upd.id in existing and upd.channel is not None:
+            planned_channels[upd.id] = upd.channel
+
+    used_channels = [channel for channel in planned_channels.values()]
+    if len(used_channels) != len(set(used_channels)):
+        raise HTTPException(409, "Duplicate camera channels are not allowed")
+
+    for upd in cameras:
+        if upd.id:
+            cam = existing.get(upd.id)
+            if cam:
+                next_channel = planned_channels[cam.id]
+                next_stream_type = upd.stream_type if upd.stream_type is not None else cam.stream_type
+                for k, v in upd.model_dump(exclude_none=True).items():
+                    setattr(cam, k, v)
+                if upd.channel is not None or upd.stream_type is not None:
+                    cam.channel_id = _camera_channel_id(next_channel, next_stream_type)
+    db.commit()
+    await _deploy_config(site_id, db)
+    return {"status": "ok"}
+
+
+def _replace_site_cameras(site: Site, items: list[AgentCameraSyncItem], db: Session) -> list[Camera]:
+    existing = db.query(Camera).filter_by(site_id=site.id).order_by(Camera.channel).all()
+    by_id = {cam.id: cam for cam in existing}
+    by_channel = {cam.channel: cam for cam in existing}
+    used_channels = [item.channel for item in items]
+    if len(used_channels) != len(set(used_channels)):
+        raise HTTPException(409, "Duplicate camera channels are not allowed")
+
+    kept_ids: set[int] = set()
+    for item in items:
+        cam = None
+        if item.id is not None:
+            cam = by_id.get(item.id)
+            if not cam:
+                raise HTTPException(404, f"Camera {item.id} not found")
+        else:
+            cam = by_channel.get(item.channel)
+
+        if cam:
+            cam.name = item.name
+            cam.channel = item.channel
+            cam.source_ref = item.source_ref
+            cam.profile_ref = item.profile_ref
+            cam.stream_type = item.stream_type
+            cam.enabled = item.enabled
+            cam.channel_id = _camera_channel_id(item.channel, item.stream_type)
+        else:
+            cam = Camera(
+                site_id=site.id,
+                name=item.name,
+                channel=item.channel,
+                channel_id=_camera_channel_id(item.channel, item.stream_type),
+                source_ref=item.source_ref,
+                profile_ref=item.profile_ref,
+                stream_type=item.stream_type,
+                enabled=item.enabled,
+            )
+            db.add(cam)
+            db.flush()
+
+        kept_ids.add(cam.id)
+
+    for cam in existing:
+        if cam.id not in kept_ids:
+            db.delete(cam)
+
+    site.channel_count = max([item.channel for item in items], default=0)
+    db.flush()
+    return db.query(Camera).filter_by(site_id=site.id).order_by(Camera.channel).all()
+
+
+@app.get("/api/agent/sites/{site_id}/bundle")
+def get_agent_bundle(site_id: str, _=Depends(require_agent_site), db: Session = Depends(get_db)):
+    site = _ensure_site_exists(site_id, db)
+    cameras = db.query(Camera).filter_by(site_id=site.id).order_by(Camera.channel).all()
+    return {
+        "site": _site_payload(site),
+        "cameras": [_camera_payload(camera) for camera in cameras],
+        "thick_client": {
+            "host": PUBLIC_HOST,
+            "http_port": site.tunnel_http_port,
+            "control_port": site.tunnel_control_port,
+            "rtsp_port": site.tunnel_rtsp_port,
+        },
+    }
+
+
+@app.put("/api/agent/sites/{site_id}/cameras/replace")
+async def replace_agent_cameras(
+    site_id: str,
+    items: list[AgentCameraSyncItem],
+    _=Depends(require_agent_site),
+    db: Session = Depends(get_db),
+):
+    site = _ensure_site_exists(site_id, db)
+    cameras = _replace_site_cameras(site, items, db)
+    db.commit()
+    await _deploy_config(site_id, db)
+    return {
+        "status": "ok",
+        "cameras": [CameraOut.model_validate(camera).model_dump() for camera in cameras],
+    }
+
+
+# ─── Streams & Traffic ────────────────────────────────────────────────────────
+
+@app.get("/api/sites/{site_id}/streams")
+def get_stream_stats(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    _ensure_site_exists(site_id, db)
+    stats = db.query(StreamStat).filter_by(site_id=site_id).all()
+    return [StreamStatOut.model_validate(s) for s in stats]
+
+
+@app.get("/api/sites/{site_id}/traffic")
+def get_traffic(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_admin)):
+    _ensure_site_exists(site_id, db)
+    since = datetime.utcnow() - timedelta(hours=hours)
+    samples = (db.query(TrafficSample)
+               .filter(TrafficSample.site_id == site_id, TrafficSample.ts >= since)
+               .order_by(TrafficSample.ts)
+               .all())
+    return [TrafficOut.model_validate(s) for s in samples]
+
+
+@app.get("/api/traffic/total")
+def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_admin)):
+    since = datetime.utcnow() - timedelta(hours=hours)
+    samples = (db.query(TrafficSample)
+               .filter(TrafficSample.ts >= since)
+               .order_by(TrafficSample.ts)
+               .all())
+    return [TrafficOut.model_validate(s) for s in samples]
+
+
+@app.get("/api/sites/{site_id}/archive", response_model=list[ArchiveRecordingOut])
+async def list_archive(
+    site_id: str,
+    camera_id: Optional[int] = None,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+    _=Depends(require_admin),
+):
+    site = _ensure_site_exists(site_id, db)
+    cameras = db.query(Camera).filter_by(site_id=site_id).order_by(Camera.channel).all()
+    if camera_id is not None:
+        _get_site_camera(db, site_id, camera_id)
+    end = end or datetime.utcnow()
+    start = start or (end - timedelta(hours=24))
+    if start >= end:
+        raise HTTPException(400, "Start time must be before end time")
+    reply = await call_agent(site_id, {
+        "action": "archive_list",
+        "site": _site_payload(site),
+        "cameras": [_camera_payload(camera) for camera in cameras],
+        "camera_id": camera_id,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "limit": max(1, min(limit, 1000)),
+    })
+    return [ArchiveRecordingOut.model_validate(item) for item in reply.get("items", [])]
+
+
+@app.post("/api/sites/{site_id}/archive/playback", response_model=ArchivePlaybackOut)
+async def start_archive_playback(
+    site_id: str,
+    data: ArchivePlaybackRequest,
+    db: Session = Depends(get_db),
+    _=Depends(require_admin),
+):
+    site = _ensure_site_exists(site_id, db)
+    camera = _get_site_camera(db, site_id, data.camera_id)
+    if data.start >= data.end:
+        raise HTTPException(400, "Start time must be before end time")
+    reply = await call_agent(site_id, {
+        "action": "archive_start_playback",
+        "site": _site_payload(site),
+        "camera": _camera_payload(camera),
+        "start": data.start.isoformat(),
+        "end": data.end.isoformat(),
+    }, timeout=30)
+    stream_path = reply["stream_path"]
+    return ArchivePlaybackOut(
+        session_id=reply["session_id"],
+        stream_path=stream_path,
+        vendor=reply.get("vendor", site.nvr_vendor),
+        rtsp_url=f"rtsp://viewer:VIEWER_PASS@{PUBLIC_HOST}:{RTSP_PORT}/{stream_path}",
+        hls_url=f"{_public_scheme()}://viewer:VIEWER_PASS@{PUBLIC_HOST}/hls/{stream_path}/index.m3u8",
+        webrtc_url=f"{_public_scheme()}://viewer:VIEWER_PASS@{PUBLIC_HOST}/webrtc/{stream_path}",
+        expires_at=datetime.fromisoformat(reply["expires_at"]),
+    )
+
+
+@app.delete("/api/sites/{site_id}/archive/playback/{session_id}")
+async def stop_archive_playback(
+    site_id: str,
+    session_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(require_admin),
+):
+    site = _ensure_site_exists(site_id, db)
+    await call_agent(site_id, {
+        "action": "archive_stop_playback",
+        "site": _site_payload(site),
+        "session_id": session_id,
+    })
+    return {"status": "stopped"}
+
+
+@app.get("/api/system/tls", response_model=TlsStatus)
+def get_tls_status(_=Depends(require_admin)):
+    return _tls_status_payload()
+
+
+@app.put("/api/system/tls", response_model=TlsStatus)
+def update_tls_certificates(data: TlsUpdateRequest, _=Depends(require_admin)):
+    fullchain_pem = data.fullchain_pem.strip()
+    privkey_pem = data.privkey_pem.strip()
+    if "BEGIN CERTIFICATE" not in fullchain_pem:
+        raise HTTPException(400, "fullchain_pem must contain a PEM certificate chain")
+    if "PRIVATE KEY" not in privkey_pem:
+        raise HTTPException(400, "privkey_pem must contain a PEM private key")
+    try:
+        _write_tls_files(fullchain_pem, privkey_pem)
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid TLS certificate or key: {exc}") from exc
+    return _tls_status_payload()
+
+
+@app.delete("/api/system/tls", response_model=TlsStatus)
+def delete_tls_certificates(_=Depends(require_admin)):
+    for path in (TLS_FULLCHAIN_PATH, TLS_PRIVKEY_PATH):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+    return _tls_status_payload()
+
+
+@app.get("/api/system/stack", response_model=StackStatus)
+def get_stack_status(_=Depends(require_admin)):
+    return _stack_status_payload()
+
+
+@app.post("/api/system/stack/restart", response_model=StackRestartResult)
+def restart_stack_services(
+    data: StackRestartRequest,
+    background_tasks: BackgroundTasks,
+    _=Depends(require_admin),
+):
+    requested = data.services or [item["key"] for item in STACK_SERVICE_SPECS]
+    unknown = [key for key in requested if key not in STACK_SERVICE_BY_KEY]
+    if unknown:
+        raise HTTPException(400, f"Unknown services: {', '.join(unknown)}")
+
+    immediate = [key for key in requested if key != "fleet-server"]
+    restarted, skipped = _restart_stack_services_now(immediate) if immediate else ([], [])
+    scheduled = []
+    message = ""
+    if "fleet-server" in requested:
+        background_tasks.add_task(_schedule_self_restart)
+        scheduled.append("fleet-server")
+        message = "fleet-server restart has been scheduled and may briefly interrupt the UI connection"
+
+    return StackRestartResult(
+        requested=requested,
+        restarted=restarted,
+        scheduled=scheduled,
+        skipped=skipped,
+        message=message,
+    )
+
+
+@app.get("/api/system/backup/export")
+def export_backup(db: Session = Depends(get_db), _=Depends(require_admin)):
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    payload = _backup_zip_bytes(db)
+    filename = f"nvr-fleet-backup-{timestamp}.zip"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(io.BytesIO(payload), media_type="application/zip", headers=headers)
+
+
+@app.post("/api/system/backup/import", response_model=BackupImportResult)
+async def import_backup(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(require_admin),
+):
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(400, "Backup file is empty")
+
+    payload, fullchain_pem, privkey_pem = _load_backup_archive(raw_bytes)
+    imported_sites = imported_cameras = imported_agents = 0
+    restored_tls = False
+    try:
+        imported_sites, imported_cameras, imported_agents = _restore_backup_payload(db, payload)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(400, f"Cannot import backup: {exc}") from exc
+
+    if fullchain_pem and privkey_pem:
+        try:
+            _write_tls_files(fullchain_pem, privkey_pem)
+            restored_tls = True
+        except Exception as exc:
+            raise HTTPException(400, f"Backup imported, but TLS restore failed: {exc}") from exc
+
+    _rebuild_mediamtx(db)
+    await _sync_tunnel_listeners(db)
+    for site in db.query(Site).order_by(Site.id).all():
+        await _deploy_config(site.id, db)
+
+    return BackupImportResult(
+        imported_sites=imported_sites,
+        imported_cameras=imported_cameras,
+        imported_agents=imported_agents,
+        restored_tls=restored_tls,
+        message="Backup imported successfully",
+    )
+
+
+@app.get("/api/dashboard")
+def dashboard(db: Session = Depends(get_db), _=Depends(require_admin)):
+    total_sites    = db.query(Site).count()
+    total_cameras  = db.query(Camera).count()
+    online_agents  = db.query(Agent).filter_by(online=True).count()
+    online_streams = db.query(StreamStat).filter_by(ready=True).count()
+    since = datetime.utcnow() - timedelta(minutes=5)
+    recent = db.query(TrafficSample).filter(TrafficSample.ts >= since).all()
+    total_rx = sum(s.rx_bytes for s in recent)
+    total_tx = sum(s.tx_bytes for s in recent)
+    return DashboardStats(
+        total_sites=total_sites,
+        total_cameras=total_cameras,
+        online_agents=online_agents,
+        online_streams=online_streams,
+        total_rx_bps=total_rx // 300,
+        total_tx_bps=total_tx // 300,
+    )
+
+
+# ─── Agent control ────────────────────────────────────────────────────────────
+
+@app.post("/api/sites/{site_id}/deploy")
+async def deploy_config(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    _ensure_site_exists(site_id, db)
+    sent = await _deploy_config(site_id, db)
+    return {"sent": sent}
+
+
+@app.post("/api/sites/{site_id}/restart")
+async def restart_agent(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    _ensure_site_exists(site_id, db)
+    sent = await send_to_agent(site_id, {"action": "restart"})
+    return {"sent": sent}
+
+
+# ─── Map ─────────────────────────────────────────────────────────────────────
+
+@app.get("/api/map")
+def get_map_data(db: Session = Depends(get_db), _=Depends(require_admin)):
+    sites = db.query(Site).all()
+    result = []
+    for s in sites:
+        agent  = db.query(Agent).filter_by(site_id=s.id).first()
+        cams   = db.query(Camera).filter_by(site_id=s.id, enabled=True).count()
+        online = db.query(StreamStat).filter_by(site_id=s.id, ready=True).count()
+        result.append({
+            "id": s.id, "name": s.name, "city": s.city,
+            "lat": s.lat, "lon": s.lon,
+            "online": agent.online if agent else False,
+            "cameras": cams, "online_streams": online,
+        })
+    return result
+
+
+# ─── Install script endpoint ──────────────────────────────────────────────────
+
+@app.get("/install.sh", response_class=PlainTextResponse)
+def install_script():
+    with open(INSTALL_SCRIPT_PATH, encoding="utf-8") as fh:
+        script = fh.read()
+    return PlainTextResponse(script, media_type="text/x-sh")
+
+
+@app.get("/agent/agent.py", response_class=PlainTextResponse)
+def agent_script():
+    with open(AGENT_SCRIPT_PATH, encoding="utf-8") as fh:
+        script = fh.read()
+    return PlainTextResponse(script, media_type="text/x-python")
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async def _deploy_config(site_id: str, db: Session) -> bool:
+    site = db.query(Site).filter_by(id=site_id).first()
+    if not site:
+        return False
+    cameras = db.query(Camera).filter_by(site_id=site_id).all()
+    yaml_content = generate_go2rtc_yaml(site, [camera for camera in cameras if camera.enabled])
+    return await send_to_agent(site_id, {
+        "action": "update_config",
+        "go2rtc_yaml": yaml_content,
+        "site": _site_payload(site),
+        "cameras": [_camera_payload(camera) for camera in cameras],
+    })
+
+
+def _rebuild_mediamtx(db: Session):
+    sites   = db.query(Site).all()
+    cameras = db.query(Camera).filter_by(enabled=True).all()
+    mediamtx_dir = os.path.dirname(MEDIAMTX_YAML)
+    if mediamtx_dir and not os.path.exists(mediamtx_dir):
+        try:
+            os.makedirs(mediamtx_dir, exist_ok=True)
+        except OSError as exc:
+            logger.warning("Skipping mediamtx rebuild in this environment: %s", exc)
+            return
+    try:
+        update_mediamtx_paths(MEDIAMTX_YAML, sites, cameras)
+    except Exception as e:
+        logger.error(f"mediamtx rebuild: {e}")
+
+
+def _write_tls_files(fullchain_pem: str, privkey_pem: str) -> TlsCertificateInfo:
+    cert_info = _load_tls_info_from_text(fullchain_pem, privkey_pem)
+    cert_dir = Path(TLS_CERT_DIR)
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    fullchain_tmp = cert_dir / "fullchain.pem.tmp"
+    privkey_tmp = cert_dir / "privkey.pem.tmp"
+    fullchain_tmp.write_text(fullchain_pem.strip() + "\n", encoding="utf-8")
+    privkey_tmp.write_text(privkey_pem.strip() + "\n", encoding="utf-8")
+    os.replace(fullchain_tmp, TLS_FULLCHAIN_PATH)
+    os.replace(privkey_tmp, TLS_PRIVKEY_PATH)
+    return cert_info

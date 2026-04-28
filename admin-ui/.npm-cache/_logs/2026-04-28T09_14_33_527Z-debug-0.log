@@ -1,0 +1,87 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.9.0
+2 info using node@v24.14.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\User\Desktop\nvr-fleet\admin-ui\.npmrc
+5 silly config load:file:C:\Users\User\.npmrc
+6 silly config load:file:C:\Users\User\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm install
+8 verbose argv "install" "--cache" ".npm-cache"
+9 verbose logfile logs-max:10 dir:C:\Users\User\Desktop\nvr-fleet\admin-ui\.npm-cache\_logs\2026-04-28T09_14_33_527Z-
+10 verbose logfile C:\Users\User\Desktop\nvr-fleet\admin-ui\.npm-cache\_logs\2026-04-28T09_14_33_527Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 silly idealTree buildDeps
+14 silly fetch manifest hls.js@^1.6.14
+15 silly packumentCache full:https://registry.npmjs.org/hls.js cache-miss
+16 http fetch GET 200 https://registry.npmjs.org/hls.js 593ms (cache miss)
+17 silly packumentCache full:https://registry.npmjs.org/hls.js set size:undefined disposed:false
+18 silly placeDep ROOT hls.js@1.6.16 OK for: nvr-fleet-admin@1.0.0 want: ^1.6.14
+19 silly reify moves {}
+20 silly audit bulk request {
+20 silly audit   '@emnapi/core': [ '1.10.0' ],
+20 silly audit   '@emnapi/runtime': [ '1.10.0' ],
+20 silly audit   '@emnapi/wasi-threads': [ '1.2.1' ],
+20 silly audit   '@napi-rs/wasm-runtime': [ '1.1.4' ],
+20 silly audit   '@oxc-project/types': [ '0.127.0' ],
+20 silly audit   '@rolldown/binding-android-arm64': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-darwin-arm64': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-darwin-x64': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-freebsd-x64': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-linux-arm-gnueabihf': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-linux-arm64-gnu': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-linux-arm64-musl': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-linux-ppc64-gnu': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-linux-s390x-gnu': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-linux-x64-gnu': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-linux-x64-musl': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-openharmony-arm64': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-wasm32-wasi': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-win32-arm64-msvc': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/binding-win32-x64-msvc': [ '1.0.0-rc.17' ],
+20 silly audit   '@rolldown/pluginutils': [ '1.0.0-rc.7', '1.0.0-rc.17' ],
+20 silly audit   '@tybys/wasm-util': [ '0.10.1' ],
+20 silly audit   '@vitejs/plugin-react': [ '6.0.1' ],
+20 silly audit   'detect-libc': [ '2.1.2' ],
+20 silly audit   fdir: [ '6.5.0' ],
+20 silly audit   fsevents: [ '2.3.3' ],
+20 silly audit   'js-tokens': [ '4.0.0' ],
+20 silly audit   lightningcss: [ '1.32.0' ],
+20 silly audit   'lightningcss-android-arm64': [ '1.32.0' ],
+20 silly audit   'lightningcss-darwin-arm64': [ '1.32.0' ],
+20 silly audit   'lightningcss-darwin-x64': [ '1.32.0' ],
+20 silly audit   'lightningcss-freebsd-x64': [ '1.32.0' ],
+20 silly audit   'lightningcss-linux-arm-gnueabihf': [ '1.32.0' ],
+20 silly audit   'lightningcss-linux-arm64-gnu': [ '1.32.0' ],
+20 silly audit   'lightningcss-linux-arm64-musl': [ '1.32.0' ],
+20 silly audit   'lightningcss-linux-x64-gnu': [ '1.32.0' ],
+20 silly audit   'lightningcss-linux-x64-musl': [ '1.32.0' ],
+20 silly audit   'lightningcss-win32-arm64-msvc': [ '1.32.0' ],
+20 silly audit   'lightningcss-win32-x64-msvc': [ '1.32.0' ],
+20 silly audit   'loose-envify': [ '1.4.0' ],
+20 silly audit   nanoid: [ '3.3.11' ],
+20 silly audit   picocolors: [ '1.1.1' ],
+20 silly audit   picomatch: [ '4.0.4' ],
+20 silly audit   postcss: [ '8.5.12' ],
+20 silly audit   react: [ '18.3.1' ],
+20 silly audit   'react-dom': [ '18.3.1' ],
+20 silly audit   rolldown: [ '1.0.0-rc.17' ],
+20 silly audit   scheduler: [ '0.23.2' ],
+20 silly audit   'source-map-js': [ '1.2.1' ],
+20 silly audit   tinyglobby: [ '0.2.16' ],
+20 silly audit   tslib: [ '2.8.1' ],
+20 silly audit   vite: [ '8.0.10' ],
+20 silly audit   'hls.js': [ '1.6.16' ]
+20 silly audit }
+21 http cache hls.js@https://registry.npmjs.org/hls.js/-/hls.js-1.6.16.tgz 0ms (cache hit)
+22 silly tarball no local data for hls.js@https://registry.npmjs.org/hls.js/-/hls.js-1.6.16.tgz. Extracting by manifest.
+23 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 269ms
+24 silly audit report {}
+25 http fetch GET 200 https://registry.npmjs.org/hls.js/-/hls.js-1.6.16.tgz 2506ms (cache miss)
+26 silly ADD node_modules/hls.js
+27 verbose cwd C:\Users\User\Desktop\nvr-fleet\admin-ui
+28 verbose os Windows_NT 10.0.26200
+29 verbose node v24.14.0
+30 verbose npm  v11.9.0
+31 verbose exit 0
+32 info ok

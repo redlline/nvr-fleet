@@ -1,0 +1,127 @@
+services:
+  nginx:
+    build: ./nginx
+    container_name: nvr-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      TLS_CERT_DIR: /etc/nginx/certs
+      TLS_FULLCHAIN_PATH: /etc/nginx/certs/fullchain.pem
+      TLS_PRIVKEY_PATH: /etc/nginx/certs/privkey.pem
+    volumes:
+      - ./nginx/certs:/etc/nginx/certs
+    depends_on:
+      - admin-ui
+      - fleet-server
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - /var/recordings:/recordings
+    logging:
+      driver: "json-file"
+      options: { max-size: "20m", max-file: "3" }
+
+  fleet-server:
+    build:
+      context: .
+      dockerfile: fleet-server/Dockerfile
+    container_name: fleet-server
+    restart: unless-stopped
+    ports:
+      - "20080-20179:20080-20179"
+      - "25554-25653:25554-25653"
+      - "28000-28099:28000-28099"
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-change-me-now}
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      RTSP_PORT: "8554"
+      MEDIAMTX_API: "http://host.docker.internal:9997"
+      MEDIAMTX_YAML: "/app/mediamtx/mediamtx.yml"
+      TUNNEL_HTTP_START: "20080"
+      TUNNEL_HTTP_END: "20179"
+      TUNNEL_RTSP_START: "25554"
+      TUNNEL_RTSP_END: "25653"
+      TUNNEL_CONTROL_START: "28000"
+      TUNNEL_CONTROL_END: "28099"
+      TLS_CERT_DIR: "/app/tls"
+      TLS_FULLCHAIN_PATH: "/app/tls/fullchain.pem"
+      TLS_PRIVKEY_PATH: "/app/tls/privkey.pem"
+    volumes:
+      - ./fleet.db:/app/fleet.db
+      - ./mediamtx:/app/mediamtx
+      - ./nginx/certs:/app/tls
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /run/systemd/private:/run/systemd/private
+      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
+    expose:
+      - "8765"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }
+
+  admin-ui:
+    build: ./admin-ui
+    container_name: nvr-admin-ui
+    restart: unless-stopped
+    depends_on:
+      - fleet-server
+    expose:
+      - "80"
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "2" }
+
+  mtx-toolkit:
+    image: ghcr.io/dan246/mtx-toolkit:latest
+    container_name: mtx-toolkit
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      MEDIAMTX_API_URL: "http://host.docker.internal:9997"
+      MEDIAMTX_RTSP_URL: "rtsp://host.docker.internal:8554"
+      DATABASE_URL: "postgresql://mtx:mtxpass@mtx-postgres:5432/mtx_toolkit"
+      REDIS_URL: "redis://mtx-redis:6379/0"
+      RECORDING_BASE_PATH: "/recordings"
+    volumes:
+      - /var/recordings:/recordings
+    depends_on:
+      - mtx-postgres
+      - mtx-redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  mtx-postgres:
+    image: postgres:15-alpine
+    container_name: mtx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mtx
+      POSTGRES_PASSWORD: mtxpass
+      POSTGRES_DB: mtx_toolkit
+    volumes:
+      - mtx_pg_data:/var/lib/postgresql/data
+    ports:
+      - "15433:5432"
+
+  mtx-redis:
+    image: redis:7-alpine
+    container_name: mtx-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+
+volumes:
+  mtx_pg_data:
