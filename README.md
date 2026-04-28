@@ -193,7 +193,7 @@ ufw allow 28000:28099/tcp
 ### 2. Клонирование и настройка
 
 ```bash
-git clone https://github.com/yourname/nvr-fleet /opt/nvr-fleet
+git clone https://github.com/redlline/NVR-Fleet /opt/nvr-fleet
 cd /opt/nvr-fleet
 cp .env.example .env
 nano .env
