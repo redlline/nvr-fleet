@@ -47,11 +47,19 @@ echo "Scheme: $SCHEME"
 echo "Arch:   $ARCH ($GO2RTC_ARCH)"
 echo
 
+AGENT_DIR="/opt/nvr-fleet-agent"
+VENV_DIR="${AGENT_DIR}/.venv"
+
 # --- Dependencies ---
 apt-get update -qq
-apt-get install -y -qq python3 python3-pip ffmpeg curl
+apt-get install -y -qq python3 python3-pip python3-venv ffmpeg curl
 
-pip3 install --quiet websockets pyyaml fastapi uvicorn
+# --- Python runtime ---
+echo "Preparing Python virtual environment..."
+mkdir -p "$AGENT_DIR"
+python3 -m venv "$VENV_DIR"
+"$VENV_DIR/bin/pip" install --quiet --upgrade pip setuptools wheel
+"$VENV_DIR/bin/pip" install --quiet websockets pyyaml fastapi uvicorn
 
 # --- go2rtc ---
 echo "Installing go2rtc..."
@@ -62,8 +70,7 @@ mkdir -p /etc/go2rtc
 
 # --- Agent ---
 echo "Installing fleet-agent..."
-mkdir -p /opt/nvr-fleet-agent
-curl -fsSL "${SCHEME}://${SERVER}/agent/agent.py" -o /opt/nvr-fleet-agent/agent.py
+curl -fsSL "${SCHEME}://${SERVER}/agent/agent.py" -o "${AGENT_DIR}/agent.py"
 
 # --- Environment ---
 cat > /etc/nvr-fleet-agent.env << EOF
@@ -109,7 +116,7 @@ StartLimitIntervalSec=0
 
 [Service]
 EnvironmentFile=/etc/nvr-fleet-agent.env
-ExecStart=/usr/bin/python3 /opt/nvr-fleet-agent/agent.py
+ExecStart=/opt/nvr-fleet-agent/.venv/bin/python /opt/nvr-fleet-agent/agent.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
