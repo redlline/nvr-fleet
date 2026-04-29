@@ -1130,8 +1130,14 @@ async def _sync_tunnel_listeners(db: Session) -> None:
 async def startup_event() -> None:
     db = SessionLocal()
     try:
-        _rebuild_mediamtx(db)
+        mediamtx_changed = _rebuild_mediamtx(db)
         await _sync_tunnel_listeners(db)
+        if mediamtx_changed:
+            try:
+                await asyncio.to_thread(_restart_stack_services_now, ["mediamtx"])
+                await asyncio.sleep(2)
+            except Exception as exc:
+                logger.warning("MediaMTX restart on startup sync failed: %s", exc)
         await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
     finally:
         db.close()
