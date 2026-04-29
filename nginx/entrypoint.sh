@@ -206,3 +206,4 @@ mkdir -p "$TLS_CERT_DIR"
 activate_best_config
 watch_tls_changes &
 exec nginx -g 'daemon off;'
+
