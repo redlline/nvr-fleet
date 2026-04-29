@@ -41,8 +41,9 @@ from schemas import (
     BackupFileOut, BackupListOut, BackupRotateRequest, BackupRotateResult, BackupImportResult,
     SiteAgentDrainResult,
 )
-from config_gen import mediamtx_internal_api_user, mediamtx_internal_api_pass,
-     (
+from config_gen import (
+    mediamtx_internal_api_user,
+    mediamtx_internal_api_pass,
     generate_go2rtc_yaml,
     normalize_stream_path,
     public_stream_path,
