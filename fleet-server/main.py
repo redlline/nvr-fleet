@@ -456,7 +456,7 @@ def _stack_status_payload() -> StackStatus:
                 attrs = container.attrs.get("State", {})
                 status_text = attrs.get("Status", "unknown")
                 health_text = attrs.get("Health", {}).get("Status", "unknown")
-                if svc.get("probe_kind") == "none":
+                if spec.get("probe_kind") == "none":
                     health_text = "N/A"
                 elif health_text == "unknown":
                     if probe_ok is True:
@@ -2489,6 +2489,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
