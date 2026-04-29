@@ -130,9 +130,17 @@ function Sidebar({ page, navigate, brand }) {
   return (
     <nav className="sidebar">
       <div className="sidebar-logo">
-        {brand.logoIcon && <span className="sidebar-logo-icon">{brand.logoIcon}</span>}
-        {brand.name}
+        {brand.logoIcon && (
+          (typeof brand.logoIcon === 'string' && 
+           (brand.logoIcon.endsWith('.png') || brand.logoIcon.endsWith('.svg'))) ? (
+            <img src={brand.logoIcon} alt="logo" className="sidebar-logo-img" />
+          ) : (
+            <span className="sidebar-logo-icon">{brand.logoIcon}</span>
+          )
+        )}
+        <span className="sidebar-logo-text">{brand.name}</span>
       </div>
+      
       {links.map((link) => {
         const Icon = link.icon
         const isActive = page === link.id || (page === "site" && link.id === "sites")
@@ -149,6 +157,7 @@ function Sidebar({ page, navigate, brand }) {
           </button>
         )
       })}
+      
       <button
         className="sidebar-link logout"
         onClick={() => {
@@ -161,6 +170,7 @@ function Sidebar({ page, navigate, brand }) {
         </span>
         Logout
       </button>
+      
       {brand.copyright && (
         <div className="sidebar-copyright">{brand.copyright}</div>
       )}
