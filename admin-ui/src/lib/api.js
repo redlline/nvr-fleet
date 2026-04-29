@@ -97,4 +97,6 @@ export const api = {
   importBackup: (file) => uploadFile("/api/system/backup/import", file),
 
   mapData: () => req("GET", "/api/map"),
+  getTrafficMtx: (siteId, hours = 1) => req("GET", `/api/sites/${siteId}/traffic/mtx?hours=${hours}`),
+  getTotalTrafficMtx: (hours = 24) => req("GET", `/api/traffic/total/mtx?hours=${hours}`),
 }
