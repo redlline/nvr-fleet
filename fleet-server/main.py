@@ -331,8 +331,13 @@ def _load_docker_client():
 
 
 def _http_probe(url: str, timeout: int = 3) -> tuple[Optional[bool], str]:
+    import urllib.error
     import urllib.parse
     import urllib.request
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
 
     try:
         parsed = urllib.parse.urlsplit(url)
@@ -352,8 +357,13 @@ def _http_probe(url: str, timeout: int = 3) -> tuple[Optional[bool], str]:
             password = urllib.parse.unquote(parsed.password or "")
             basic_token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
             req.add_header("Authorization", f"Basic {basic_token}")
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+        opener = urllib.request.build_opener(_NoRedirect)
+        with opener.open(req, timeout=timeout) as response:
             return True, f"HTTP {response.status}"
+    except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            return True, f"HTTP {exc.code}"
+        return False, str(exc)
     except Exception as exc:
         return False, str(exc)
 
