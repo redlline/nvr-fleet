@@ -58,7 +58,7 @@ server {
     location /hls/ {
         proxy_pass http://host.docker.internal:8888/;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host \$host;
         proxy_set_header Cookie $http_cookie;
         proxy_pass_header Set-Cookie;
         proxy_set_header X-Forwarded-Proto \$scheme;
@@ -144,7 +144,7 @@ server {
     location /hls/ {
         proxy_pass http://host.docker.internal:8888/;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host \$host;
         proxy_set_header Cookie $http_cookie;
         proxy_pass_header Set-Cookie;
         proxy_set_header X-Forwarded-Proto \$scheme;
@@ -206,4 +206,5 @@ mkdir -p "$TLS_CERT_DIR"
 activate_best_config
 watch_tls_changes &
 exec nginx -g 'daemon off;'
+
 
