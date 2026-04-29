@@ -1712,6 +1712,54 @@ async def _mtx_metrics_poll_loop():
 
 
 
+@app.get("/api/traffic/realtime")
+def get_traffic_realtime(_=Depends(require_admin)):
+    """Real-time traffic: latest MTX metrics sample (rx/tx bytes per second)."""
+    import re
+    try:
+        resp = requests.get(
+            f"{MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')}/metrics",
+            auth=(mediamtx_internal_api_user(), mediamtx_internal_api_pass()),
+            timeout=3,
+        )
+        resp.raise_for_status()
+    except Exception:
+        return {"rx_bps": 0, "tx_bps": 0, "streams": {}}
+
+    rx_bytes = {}
+    tx_bytes = {}
+    for line in resp.text.splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        m = re.match(r'paths_bytes_received\{name="([^"]+)"[^}]*\}\s+([\d.]+)', line)
+        if m:
+            rx_bytes[m.group(1)] = int(float(m.group(2)))
+        m = re.match(r'paths_bytes_sent\{name="([^"]+)"[^}]*\}\s+([\d.]+)', line)
+        if m:
+            tx_bytes[m.group(1)] = int(float(m.group(2)))
+
+    global _mtx_last_poll
+    now_ts = datetime.utcnow().timestamp()
+    prev_ts = _mtx_last_poll.get("__ts__", now_ts - 30)
+    interval = max(now_ts - prev_ts, 1)
+
+    streams = {}
+    total_rx_bps = 0
+    total_tx_bps = 0
+    for path in set(list(rx_bytes.keys()) + list(tx_bytes.keys())):
+        prev = _mtx_last_poll.get(path, {})
+        delta_rx = max(rx_bytes.get(path, 0) - prev.get("rx", 0), 0)
+        delta_tx = max(tx_bytes.get(path, 0) - prev.get("tx", 0), 0)
+        rx_bps = int(delta_rx / interval)
+        tx_bps = int(delta_tx / interval)
+        streams[path] = {"rx_bps": rx_bps, "tx_bps": tx_bps}
+        total_rx_bps += rx_bps
+        total_tx_bps += tx_bps
+
+    return {"rx_bps": total_rx_bps, "tx_bps": total_tx_bps, "streams": streams}
+
+
+
 @app.get("/api/sites/{site_id}/archive", response_model=list[ArchiveRecordingOut])
 async def list_archive(
     site_id: str,
@@ -2309,6 +2357,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
