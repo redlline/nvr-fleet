@@ -41,7 +41,8 @@ from schemas import (
     BackupFileOut, BackupListOut, BackupRotateRequest, BackupRotateResult, BackupImportResult,
     SiteAgentDrainResult,
 )
-from config_gen import (
+from config_gen import mediamtx_internal_api_user, mediamtx_internal_api_pass,
+     (
     generate_go2rtc_yaml,
     normalize_stream_path,
     public_stream_path,
@@ -271,14 +272,14 @@ STACK_SERVICE_SPECS = [
         "key": "mtx-toolkit-worker",
         "label": "MTX Toolkit Worker",
         "container_name": "mtx-toolkit-celery-worker",
-        "probe_kind": "",
+        "probe_kind": "none",
         "probe_target": "",
     },
     {
         "key": "mtx-toolkit-beat",
         "label": "MTX Toolkit Beat",
         "container_name": "mtx-toolkit-celery-beat",
-        "probe_kind": "",
+        "probe_kind": "none",
         "probe_target": "",
     },
     {
@@ -431,7 +432,9 @@ def _stack_status_payload() -> StackStatus:
                 attrs = container.attrs.get("State", {})
                 status_text = attrs.get("Status", "unknown")
                 health_text = attrs.get("Health", {}).get("Status", "unknown")
-                if health_text == "unknown":
+                if svc.get("probe_kind") == "none":
+                    health_text = "N/A"
+                elif health_text == "unknown":
                     if probe_ok is True:
                         health_text = "reachable"
                     elif probe_ok is False:
@@ -1616,6 +1619,7 @@ def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get
     try:
         resp = requests.get(
             f"{MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')}/metrics",
+            auth=(mediamtx_internal_api_user(), mediamtx_internal_api_pass()),
             timeout=3,
         )
         resp.raise_for_status()
@@ -1631,6 +1635,7 @@ def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depe
     try:
         resp = requests.get(
             f"{MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')}/metrics",
+            auth=(mediamtx_internal_api_user(), mediamtx_internal_api_pass()),
             timeout=3,
         )
         resp.raise_for_status()
@@ -2277,5 +2282,6 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
