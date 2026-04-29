@@ -59,6 +59,7 @@ server {
         proxy_pass http://host.docker.internal:8888/;
         proxy_set_header Authorization "Basic dmlld2VyOlZJRVdFUl9QQVNT";
         proxy_redirect / /hls/;
+        proxy_cookie_path / /hls/;
         add_header Cache-Control no-cache always;
         add_header Access-Control-Allow-Origin * always;
         add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
@@ -142,6 +143,7 @@ server {
         proxy_pass http://host.docker.internal:8888/;
         proxy_set_header Authorization "Basic dmlld2VyOlZJRVdFUl9QQVNT";
         proxy_redirect / /hls/;
+        proxy_cookie_path / /hls/;
         add_header Cache-Control no-cache always;
         add_header Access-Control-Allow-Origin * always;
         add_header Access-Control-Allow-Methods "GET, OPTIONS" always;

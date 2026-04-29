@@ -57,6 +57,15 @@ patch_text(
     '        # Use nginx proxy path with node ID - works in Docker environment\n'
     '        # nginx routes /hls/node1/, /hls/node3/ to different MediaMTX instances\n'
     '        return f"/hls/node{node.id}"\n',
+    '    if use_proxy:\n'
+    '        # Use the local /hls proxy path. When toolkit is opened directly on :3001,\n'
+    '        # frontend nginx serves it. When toolkit is opened through /monitor/ on the\n'
+    '        # main domain, the same-origin request is handled by the main nginx /hls route.\n'
+    '        return "/hls"\n',
+)
+
+patch_text(
+    "backend/app/api/streams.py",
     '    public_host = os.getenv("PUBLIC_HOST", "").strip()\n'
     '    public_scheme = os.getenv("PUBLIC_SCHEME", "https").strip() or "https"\n'
     '    if public_host:\n'
@@ -66,6 +75,11 @@ patch_text(
     '        # Use nginx proxy path with node ID - works in Docker environment\n'
     '        # nginx routes /hls/node1/, /hls/node3/ to different MediaMTX instances\n'
     '        return f"/hls/node{node.id}"\n',
+    '    if use_proxy:\n'
+    '        # Use the local /hls proxy path. When toolkit is opened directly on :3001,\n'
+    '        # frontend nginx serves it. When toolkit is opened through /monitor/ on the\n'
+    '        # main domain, the same-origin request is handled by the main nginx /hls route.\n'
+    '        return "/hls"\n',
 )
 
 patch_text(
