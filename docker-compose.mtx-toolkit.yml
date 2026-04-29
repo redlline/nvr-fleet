@@ -12,7 +12,8 @@ services:
       DATABASE_URL: postgresql://mtx:mtx_password@mtx-toolkit-postgres:5432/mtx_toolkit
       REDIS_URL: redis://mtx-toolkit-redis:6379/0
       MEDIAMTX_API_URL: http://mediamtx-internal:MEDIAMTX_INTERNAL_PASS@host.docker.internal:9997
-      MEDIAMTX_RTSP_URL: rtsp://host.docker.internal:8554
+      MEDIAMTX_RTSP_URL: rtsp://viewer:VIEWER_PASS@host.docker.internal:8554
+      MEDIAMTX_HLS_PORT: "8888"
       RECORDING_BASE_PATH: /recordings
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -34,6 +35,8 @@ services:
     restart: unless-stopped
     ports:
       - "3001:80"
+    volumes:
+      - ./mtx-toolkit/frontend.nginx.conf:/etc/nginx/conf.d/default.conf:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -73,7 +76,8 @@ services:
       DATABASE_URL: postgresql://mtx:mtx_password@mtx-toolkit-postgres:5432/mtx_toolkit
       REDIS_URL: redis://mtx-toolkit-redis:6379/0
       MEDIAMTX_API_URL: http://mediamtx-internal:MEDIAMTX_INTERNAL_PASS@host.docker.internal:9997
-      MEDIAMTX_RTSP_URL: rtsp://host.docker.internal:8554
+      MEDIAMTX_RTSP_URL: rtsp://viewer:VIEWER_PASS@host.docker.internal:8554
+      MEDIAMTX_HLS_PORT: "8888"
       RECORDING_BASE_PATH: /recordings
     extra_hosts:
       - "host.docker.internal:host-gateway"

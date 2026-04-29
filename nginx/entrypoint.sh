@@ -57,6 +57,7 @@ server {
 
     location /hls/ {
         proxy_pass http://host.docker.internal:8888/;
+        proxy_set_header Authorization "Basic dmlld2VyOlZJRVdFUl9QQVNT";
         add_header Cache-Control no-cache;
         add_header Access-Control-Allow-Origin *;
     }
@@ -132,6 +133,7 @@ server {
 
     location /hls/ {
         proxy_pass http://host.docker.internal:8888/;
+        proxy_set_header Authorization "Basic dmlld2VyOlZJRVdFUl9QQVNT";
         add_header Cache-Control no-cache;
         add_header Access-Control-Allow-Origin *;
     }
