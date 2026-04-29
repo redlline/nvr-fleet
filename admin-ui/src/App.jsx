@@ -9,6 +9,14 @@ import System from "./pages/System"
 import Login from "./pages/Login"
 import WatchPage from "./pages/WatchPage"
 
+// ── Branding (edit these to rebrand) ──────────────────────────────────────────
+const BRAND = {
+  name:      "NVR Fleet",          // Panel title in sidebar
+  logoIcon:  "📹",                  // Emoji or text icon next to name
+  copyright: "© 2026 NVR Fleet",   // Footer copyright
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function readRoute() {
   const url = new URL(window.location.href)
   const page = url.searchParams.get("page")
@@ -57,12 +65,16 @@ export default function App() {
   const [route, setRoute] = useState(() => readRoute())
 
   useEffect(() => {
+    document.title = BRAND.name
+  }, [])
+
+  useEffect(() => {
     const onPopState = () => setRoute(readRoute())
     window.addEventListener("popstate", onPopState)
     return () => window.removeEventListener("popstate", onPopState)
   }, [])
 
-  if (!authed) return <Login onLogin={() => setAuthed(true)} />
+  if (!authed) return <Login onLogin={() => setAuthed(true)} brandName={BRAND.name} />
 
   function navigate(nextPage, site = null, extra = {}) {
     const nextRoute = {
@@ -77,7 +89,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar page={route.page} navigate={navigate} />
+      <Sidebar page={route.page} navigate={navigate} brand={BRAND} />
       <main className="content">
         {route.page === "dashboard" && <Dashboard navigate={navigate} />}
         {route.page === "sites" && <Sites navigate={navigate} />}
@@ -98,18 +110,21 @@ export default function App() {
   )
 }
 
-function Sidebar({ page, navigate }) {
+function Sidebar({ page, navigate, brand }) {
   const links = [
     { id: "dashboard", icon: "D", label: "Dashboard" },
-    { id: "sites", icon: "S", label: "Sites" },
-    { id: "map", icon: "M", label: "Network Map" },
-    { id: "traffic", icon: "T", label: "Traffic" },
-    { id: "system", icon: "C", label: "System" },
+    { id: "sites",     icon: "S", label: "Sites" },
+    { id: "map",       icon: "M", label: "Network Map" },
+    { id: "traffic",   icon: "T", label: "Traffic" },
+    { id: "system",    icon: "C", label: "System" },
   ]
 
   return (
     <nav className="sidebar">
-      <div className="sidebar-logo">NVR Fleet</div>
+      <div className="sidebar-logo">
+        {brand.logoIcon && <span className="sidebar-logo-icon">{brand.logoIcon}</span>}
+        {brand.name}
+      </div>
       {links.map((link) => (
         <button
           key={link.id}
@@ -130,6 +145,9 @@ function Sidebar({ page, navigate }) {
         <span className="sidebar-icon">X</span>
         Logout
       </button>
+      {brand.copyright && (
+        <div className="sidebar-copyright">{brand.copyright}</div>
+      )}
     </nav>
   )
 }
