@@ -59,8 +59,6 @@ server {
         proxy_pass http://host.docker.internal:8888/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
-        proxy_set_header Cookie $http_cookie;
-        proxy_pass_header Set-Cookie;
         proxy_set_header X-Forwarded-Proto \$scheme;
         add_header Cache-Control no-cache always;
         add_header Access-Control-Allow-Origin * always;
@@ -145,8 +143,6 @@ server {
         proxy_pass http://host.docker.internal:8888/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
-        proxy_set_header Cookie $http_cookie;
-        proxy_pass_header Set-Cookie;
         proxy_set_header X-Forwarded-Proto \$scheme;
         add_header Cache-Control no-cache always;
         add_header Access-Control-Allow-Origin * always;
@@ -206,5 +202,6 @@ mkdir -p "$TLS_CERT_DIR"
 activate_best_config
 watch_tls_changes &
 exec nginx -g 'daemon off;'
+
 
 
