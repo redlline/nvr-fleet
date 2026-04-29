@@ -468,9 +468,11 @@ function Badge({ state }) {
   const value = String(state || "unknown").toLowerCase()
   const variant = value === "running" || value === "healthy" || value === "reachable"
     ? "badge-green"
-    : value === "unknown" || value === "starting"
-      ? "badge-amber"
-      : "badge-red"
+    : value === "n/a"
+      ? "badge-gray"
+      : value === "unknown" || value === "starting"
+        ? "badge-amber"
+        : "badge-red"
   return <span className={`badge ${variant}`}>{state}</span>
 }
 
@@ -485,3 +487,4 @@ function formatBytes(bytes) {
   }
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }
+
