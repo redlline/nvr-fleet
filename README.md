@@ -251,80 +251,80 @@ nvr-fleet/
 
 
 ---
+---
 
-## Bandwidth & Performance Benchmarks
+## Пропускная способность и производительность
 
-> Measured on a typical production setup:
-> - **VPS**: 2 vCPU, 4 GB RAM, 1 Gbps uplink (Hetzner CX22)
-> - **Mini-PC**: Intel N100, 8 GB RAM, Ubuntu 22.04
+> Замеры на типичном production-стенде:
+> - **VPS**: 2 vCPU, 4 ГБ RAM, 1 Гбит/с (Hetzner CX22)
+> - **Мини-ПК**: Intel N100, 8 ГБ RAM, Ubuntu 22.04
 > - **go2rtc**: v1.9.14, **MediaMTX**: v1.11.3
-> - **Camera streams**: H.264, 1080p @ 25 fps
+> - **Потоки с камер**: H.264, 1080p @ 25 fps
 
-### Single tunnel throughput
+### Пропускная способность одного туннеля
 
-| Transport | Bitrate | CPU (mini-PC agent) | CPU (VPS fleet-server) | Latency added |
-|-----------|---------|---------------------|------------------------|---------------|
-| WebSocket (WS over TLS) | 4 Mbit/s | ~1.2% | ~0.8% | +2–5 ms |
-| WebSocket (WS over TLS) | 8 Mbit/s | ~2.1% | ~1.4% | +2–5 ms |
-| Direct RTSP (no tunnel) | 4 Mbit/s | ~0.3% | — | baseline |
+| Транспорт | Битрейт | CPU (агент на мини-ПК) | CPU (fleet-server на VPS) | Добавленная задержка |
+|-----------|---------|------------------------|---------------------------|----------------------|
+| WebSocket (WS over TLS) | 4 Мбит/с | ~1.2% | ~0.8% | +2–5 мс |
+| WebSocket (WS over TLS) | 8 Мбит/с | ~2.1% | ~1.4% | +2–5 мс |
+| Прямой RTSP (без туннеля) | 4 Мбит/с | ~0.3% | — | baseline |
 
-> WebSocket framing overhead is **≈0.01–0.05%** of total bandwidth (2–14 bytes per frame).
-> The dominant latency factor is RTT between site and VPS, not WS overhead.
+> **Накладные расходы WebSocket-фреймирования — ≈0.01–0.05%** от суммарного трафика (2–14 байт на фрейм).
+> Основной фактор задержки — RTT между площадкой и VPS, а не WS-оверхед.
 
-### Agent CPU: 4× streams @ 4 Mbit/s each (16 Mbit/s total)
+### CPU агента: 4 потока × 4 Мбит/с (итого 16 Мбит/с)
 
-| Component | CPU usage |
-|-----------|-----------|
-| go2rtc (RTSP ingest + remux) | ~4–6% |
-| fleet-agent (WS tunnel + stats) | ~1.5–2% |
-| **Total agent process** | **~6–8%** |
+| Компонент | Потребление CPU |
+|-----------|-----------------|
+| go2rtc (приём RTSP + ремукс) | ~4–6% |
+| fleet-agent (WS-туннель + статистика) | ~1.5–2% |
+| **Итого (процесс агента)** | **~6–8%** |
 
-> go2rtc does hardware-accelerated remux when possible (passthrough H.264).
-> CPU is dominated by go2rtc network I/O, not encoding.
+> go2rtc выполняет аппаратно-ускоренный ремукс там где возможно (passthrough H.264).
+> CPU нагружается сетевым I/O go2rtc, а не кодированием.
 
-### VPS: 10 sites × 2 streams @ 4 Mbit/s each
+### VPS: 10 площадок × 2 потока × 4 Мбит/с
 
-| Component | CPU | RAM | Network |
-|-----------|-----|-----|---------|
-| MediaMTX (20 RTSP paths) | ~3–5% | ~120 MB | 80 Mbit/s in |
-| fleet-server (10 WS + 20 TCP listeners) | ~1–2% | ~80 MB | — |
-| Nginx (HTTPS + HLS proxy) | ~1% | ~30 MB | — |
-| **Total** | **~5–8%** | **~230 MB** | **80 Mbit/s** |
+| Компонент | CPU | RAM | Сеть |
+|-----------|-----|-----|------|
+| MediaMTX (20 RTSP путей) | ~3–5% | ~120 МБ | 80 Мбит/с входящих |
+| fleet-server (10 WS + 20 TCP листенеров) | ~1–2% | ~80 МБ | — |
+| Nginx (HTTPS + HLS-прокси) | ~1% | ~30 МБ | — |
+| **Итого** | **~5–8%** | **~230 МБ** | **80 Мбит/с** |
 
-### Scaling estimates
+### Оценка масштабирования
 
-| Sites | Streams | VPS spec recommended | Bottleneck |
-|-------|---------|----------------------|------------|
-| 10 | 20–40 | 2 vCPU / 4 GB / 200 Mbit | Network |
-| 50 | 100–200 | 4 vCPU / 8 GB / 1 Gbit | MediaMTX |
-| 100 | 200–400 | 8 vCPU / 16 GB / 1 Gbit | MediaMTX |
-| 500 | 1000+ | Cluster (3+ VPS) | fleet-server WS |
+| Площадок | Потоков | Рекомендуемый VPS | Узкое место |
+|----------|---------|-------------------|-------------|
+| 10 | 20–40 | 2 vCPU / 4 ГБ / 200 Мбит | Сеть |
+| 50 | 100–200 | 4 vCPU / 8 ГБ / 1 Гбит | MediaMTX |
+| 100 | 200–400 | 8 vCPU / 16 ГБ / 1 Гбит | MediaMTX |
+| 500 | 1000+ | Кластер (3+ VPS) | fleet-server WS |
 
-> **MediaMTX practical limit**: ~200–300 concurrent RTSP paths per instance at 4 Mbit/s each.
-> Beyond 100 sites, consider sharding MediaMTX by region.
+> **Практический лимит MediaMTX**: ~200–300 одновременных RTSP-путей на один инстанс при 4 Мбит/с каждый.
+> При более 100 площадок рекомендуется шардировать MediaMTX по регионам.
 
-### WebSocket vs raw TCP tunnel
+### WebSocket против сырого TCP-туннеля
 
-WebSocket is the right choice for this architecture because:
+WebSocket — правильный выбор для данной архитектуры по трём причинам:
 
-1. **Control plane is tiny** — agent↔server commands are ~1 KB/s, WS overhead is negligible.
-2. **RTSP is pushed agent→MediaMTX directly** via go2rtc, not through the WS tunnel.
-3. **The WS tunnel is used only for thick client ports** (iVMS-4200 RTSP/HTTP/Control), which are low-frequency connections, not streaming.
+1. **Control-plane крошечный** — команды агент↔сервер занимают ~1 КБ/с, WS-оверхед незначим.
+2. **RTSP пушится агентом напрямую в MediaMTX** через go2rtc, минуя WS-туннель.
+3. **WS-туннель используется только для портов толстых клиентов** (iVMS-4200: RTSP/HTTP/Control) — низкочастотные соединения, не стриминг.
 
-A raw TCP tunnel would only be beneficial if you were streaming video through the tunnel itself, which this architecture explicitly avoids.
+Сырой TCP-туннель оправдан только если видео идёт через сам туннель — чего данная архитектура явно избегает.
 
-### Port cleanup on site deletion
+### Очистка портов при удалении площадки
 
-When a site is deleted:
-1. Agent receives `shutdown` command via WebSocket
-2. Active WebSocket connection is explicitly closed
-3. DB records are removed (cameras, agents, streams, traffic)
-4. MediaMTX config is rebuilt (removes site paths)
-5. TCP tunnel listeners for the site's 3 ports (HTTP/RTSP/Control) are closed with a 5s graceful timeout
-6. Ports are immediately available for reallocation
+При удалении площадки выполняется последовательно:
+1. Агент получает команду `shutdown` по WebSocket
+2. Активное WebSocket-соединение явно закрывается
+3. Записи в БД удаляются (камеры, агенты, потоки, трафик)
+4. Конфиг MediaMTX перестраивается (пути площадки удаляются)
+5. TCP-листенеры для 3 портов площадки (HTTP/RTSP/Control) закрываются с таймаутом 5 секунд
+6. Порты сразу доступны для повторного использования
 
-Log output on deletion:
+Лог при удалении:
 ```
 INFO: Site a4bb595d (Valera home) deleted. Released ports: HTTP=20080 RTSP=25554 CTRL=28000
 ```
-
