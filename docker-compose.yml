@@ -20,7 +20,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   mediamtx:
-    image: bluenviron/mediamtx:latest
+    image: bluenviron/mediamtx:1.11.3
     container_name: mediamtx
     restart: unless-stopped
     network_mode: host

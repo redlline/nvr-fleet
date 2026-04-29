@@ -71,7 +71,7 @@ export default function StreamsTab({ siteId, publicHost }) {
             )}
             {rows.map(({ camera, path, ready, updated }) => {
               const rtsp = `rtsp://viewer:VIEWER_PASS@${publicHost}:8554/${path}`
-              const hls = `${webScheme}://${publicHost}/hls/${path}/index.m3u8`
+              const hls = `/hls/${path}/index.m3u8`
               const watchUrl = `/?page=watch&site=${encodeURIComponent(siteId)}&watch=${encodeURIComponent(path)}&label=${encodeURIComponent(camera.name || `Cam ${camera.channel}`)}`
 
               return (
