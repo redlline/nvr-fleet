@@ -1147,6 +1147,7 @@ async def _sync_tunnel_listeners(db: Session) -> None:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    asyncio.create_task(_mtx_metrics_poll_loop())
     db = SessionLocal()
     try:
         mediamtx_changed = _rebuild_mediamtx(db)
@@ -1620,22 +1621,25 @@ def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(
 @app.get("/api/sites/{site_id}/traffic/mtx")
 def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_admin)):
     """Traffic from MediaMTX metrics API (per site)."""
-    try:
-        resp = requests.get(
-            f"{MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')}/metrics",
-            auth=(mediamtx_internal_api_user(), mediamtx_internal_api_pass()),
-            timeout=3,
-        )
-        resp.raise_for_status()
-        samples = _parse_mtx_metrics(resp.text, site_id, hours)
-        return samples
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    samples = _parse_mtx_metrics(site_id, hours)
+    return samples
 
 
 @app.get("/api/traffic/total/mtx")
 def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_admin)):
     """Traffic from MediaMTX metrics API (all sites)."""
+    samples = _parse_mtx_metrics(None, hours)
+    return samples
+
+
+# Background MediaMTX metrics poller
+_mtx_samples: list[dict] = []
+_mtx_last_poll: dict = {}
+
+def _poll_mtx_metrics():
+    """Poll MediaMTX metrics and store delta samples. Called by background scheduler."""
+    import re
+    global _mtx_samples, _mtx_last_poll
     try:
         resp = requests.get(
             f"{MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')}/metrics",
@@ -1643,67 +1647,69 @@ def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depe
             timeout=3,
         )
         resp.raise_for_status()
-        samples = _parse_mtx_metrics(resp.text, None, hours)
-        return samples
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception:
+        return
 
-
-def _parse_mtx_metrics(metrics_text: str, site_id, hours: int):
-    """Parse MediaMTX Prometheus metrics into traffic samples using delta calculation."""
-    import re
-    global _mtx_metrics_cache
     now = datetime.utcnow()
-
     rx_bytes = {}
     tx_bytes = {}
 
-    for line in metrics_text.splitlines():
+    for line in resp.text.splitlines():
         if line.startswith("#") or not line.strip():
             continue
-        # paths_bytes_received{name="sitea4bb595d/cam01",state="ready"} 12345
         m = re.match(r'paths_bytes_received\{name="([^"]+)"[^}]*\}\s+([\d.]+)', line)
         if m:
-            path, val = m.group(1), int(float(m.group(2)))
-            if site_id is None or path.startswith(f"site{site_id}/"):
-                rx_bytes[path] = rx_bytes.get(path, 0) + val
+            rx_bytes[m.group(1)] = int(float(m.group(2)))
         m = re.match(r'paths_bytes_sent\{name="([^"]+)"[^}]*\}\s+([\d.]+)', line)
         if m:
-            path, val = m.group(1), int(float(m.group(2)))
-            if site_id is None or path.startswith(f"site{site_id}/"):
-                tx_bytes[path] = tx_bytes.get(path, 0) + val
-
-    if not rx_bytes and not tx_bytes:
-        return []
-
-    # Calculate deltas from cache
-    cache_key = f"mtx_{site_id}"
-    prev = _mtx_metrics_cache.get(cache_key, {})
-    samples = []
+            tx_bytes[m.group(1)] = int(float(m.group(2)))
 
     all_paths = set(list(rx_bytes.keys()) + list(tx_bytes.keys()))
     for path in all_paths:
         cur_rx = rx_bytes.get(path, 0)
         cur_tx = tx_bytes.get(path, 0)
-        prev_rx = prev.get(path, {}).get("rx", cur_rx)
-        prev_tx = prev.get(path, {}).get("tx", cur_tx)
-        delta_rx = max(cur_rx - prev_rx, 0)
-        delta_tx = max(cur_tx - prev_tx, 0)
-        samples.append({
+        prev = _mtx_last_poll.get(path, {})
+        delta_rx = max(cur_rx - prev.get("rx", cur_rx), 0)
+        delta_tx = max(cur_tx - prev.get("tx", cur_tx), 0)
+        _mtx_samples.append({
             "ts": now.isoformat() + "Z",
             "rx_bytes": delta_rx,
             "tx_bytes": delta_tx,
             "stream_path": path,
-            "site_id": site_id or "",
         })
 
-    # Update cache
-    _mtx_metrics_cache[cache_key] = {
+    # Keep only last 24h of samples
+    cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
+    _mtx_samples = [s for s in _mtx_samples if s["ts"] >= cutoff]
+
+    _mtx_last_poll = {
         path: {"rx": rx_bytes.get(path, 0), "tx": tx_bytes.get(path, 0)}
         for path in all_paths
     }
 
-    return samples
+
+def _parse_mtx_metrics(site_id, hours: int):
+    """Return stored MediaMTX traffic samples filtered by site_id and hours."""
+    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
+    result = []
+    for s in _mtx_samples:
+        if s["ts"] < cutoff:
+            continue
+        if site_id is None or s["stream_path"].startswith(f"site{site_id}/"):
+            result.append(s)
+    return result
+
+async def _mtx_metrics_poll_loop():
+    """Background loop: poll MediaMTX metrics every 30s."""
+    await asyncio.sleep(10)  # initial delay
+    while True:
+        try:
+            await asyncio.to_thread(_poll_mtx_metrics)
+        except Exception as exc:
+            logger.debug("MTX metrics poll error: %s", exc)
+        await asyncio.sleep(30)
+
+
 
 
 @app.get("/api/sites/{site_id}/archive", response_model=list[ArchiveRecordingOut])
@@ -2303,6 +2309,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
