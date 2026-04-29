@@ -8,12 +8,20 @@ import Traffic from "./pages/Traffic"
 import System from "./pages/System"
 import Login from "./pages/Login"
 import WatchPage from "./pages/WatchPage"
+import { 
+  LayoutDashboard, 
+  Server, 
+  Map, 
+  Activity, 
+  Settings,
+  LogOut
+} from "lucide-react"
 
 // ── Branding (edit these to rebrand) ──────────────────────────────────────────
 const BRAND = {
-  name:      "NVR Fleet",          // Panel title in sidebar
-  logoIcon:  "📹",                  // Emoji or text icon next to name
-  copyright: "© 2026 NVR Fleet",   // Footer copyright
+  name:      "CCTV CONNECT",
+  logoIcon:  "📹",
+  copyright: "Created by Bullet2267 © 2026 NVR Fleet",
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -112,11 +120,11 @@ export default function App() {
 
 function Sidebar({ page, navigate, brand }) {
   const links = [
-    { id: "dashboard", icon: "D", label: "Dashboard" },
-    { id: "sites",     icon: "S", label: "Sites" },
-    { id: "map",       icon: "M", label: "Network Map" },
-    { id: "traffic",   icon: "T", label: "Traffic" },
-    { id: "system",    icon: "C", label: "System" },
+    { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+    { id: "sites",     icon: Server,          label: "Sites" },
+    { id: "map",       icon: Map,             label: "Network Map" },
+    { id: "traffic",   icon: Activity,        label: "Traffic" },
+    { id: "system",    icon: Settings,        label: "System" },
   ]
 
   return (
@@ -125,16 +133,22 @@ function Sidebar({ page, navigate, brand }) {
         {brand.logoIcon && <span className="sidebar-logo-icon">{brand.logoIcon}</span>}
         {brand.name}
       </div>
-      {links.map((link) => (
-        <button
-          key={link.id}
-          className={`sidebar-link ${page === link.id || (page === "site" && link.id === "sites") ? "active" : ""}`}
-          onClick={() => navigate(link.id)}
-        >
-          <span className="sidebar-icon">{link.icon}</span>
-          {link.label}
-        </button>
-      ))}
+      {links.map((link) => {
+        const Icon = link.icon
+        const isActive = page === link.id || (page === "site" && link.id === "sites")
+        return (
+          <button
+            key={link.id}
+            className={`sidebar-link ${isActive ? "active" : ""}`}
+            onClick={() => navigate(link.id)}
+          >
+            <span className="sidebar-icon">
+              <Icon size={18} strokeWidth={1.5} />
+            </span>
+            {link.label}
+          </button>
+        )
+      })}
       <button
         className="sidebar-link logout"
         onClick={() => {
@@ -142,7 +156,9 @@ function Sidebar({ page, navigate, brand }) {
           window.location.reload()
         }}
       >
-        <span className="sidebar-icon">X</span>
+        <span className="sidebar-icon">
+          <LogOut size={18} strokeWidth={1.5} />
+        </span>
         Logout
       </button>
       {brand.copyright && (
