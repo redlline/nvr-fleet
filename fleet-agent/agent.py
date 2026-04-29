@@ -268,7 +268,9 @@ LOCAL_ADMIN_HTML = """
     }
 
     function defaultControlPort(vendor) {
-      return vendor === "dahua" ? 37777 : 8000
+      if (vendor === "dahua") return 37777
+      if (vendor === "unv" || vendor === "uniview") return 37777
+      return 8000
     }
 
     function syncChannelCount() {
@@ -1581,6 +1583,27 @@ class DahuaArchiveAdapter(OnvifArchiveAdapter):
     discovery_protocol = "onvif-media"
 
 
+class UNVArchiveAdapter(OnvifArchiveAdapter):
+    """Uniview (UNV) NVR adapter.
+
+    UNV supports standard ONVIF for both live and recording queries.
+    Live RTSP URL pattern: rtsp://<user>:<pass>@<host>:554/unicast/c<CH>/s0/live
+    """
+    vendor = "unv"
+    discovery_protocol = "onvif-media"
+
+    def live_url(self, camera: dict) -> str:
+        """UNV RTSP URL uses channel-based path instead of ONVIF profile token."""
+        ch = int(camera.get("channel", 1))
+        site = self.site
+        user = site.get("nvr_user", "admin")
+        password = site.get("nvr_password", "")
+        host = site.get("nvr_ip", "")
+        port = site.get("nvr_rtsp_port", 554)
+        # Try standard UNV RTSP path first; fallback to ONVIF GetStreamUri
+        return f"rtsp://{user}:{password}@{host}:{port}/unicast/c{ch}/s0/live"
+
+
 def get_archive_adapter(site: dict, cameras: list[dict]):
     vendor = (site.get("vendor") or "hikvision").strip().lower()
     if vendor == "hikvision":
@@ -1589,7 +1612,11 @@ def get_archive_adapter(site: dict, cameras: list[dict]):
         return OnvifArchiveAdapter(site, cameras)
     if vendor == "dahua":
         return DahuaArchiveAdapter(site, cameras)
-    raise AdapterError(f"Unsupported NVR vendor: {vendor}")
+    if vendor in ("unv", "uniview"):
+        return UNVArchiveAdapter(site, cameras)
+    # Fallback: try ONVIF for any unknown vendor
+    log.warning("Unknown vendor %r, falling back to ONVIF adapter", vendor)
+    return OnvifArchiveAdapter(site, cameras)
 
 
 def build_go2rtc_yaml(site: dict, cameras: list[dict]) -> str:
