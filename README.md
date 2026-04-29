@@ -328,3 +328,115 @@ WebSocket — правильный выбор для данной архитек
 ```
 INFO: Site a4bb595d (Valera home) deleted. Released ports: HTTP=20080 RTSP=25554 CTRL=28000
 ```
+
+
+---
+
+## Ограничения и известные компромиссы
+
+### SQLite vs PostgreSQL
+
+Текущий бэкенд — SQLite (WAL mode). Это сознательный выбор для простоты деплоя.
+
+| Сценарий | SQLite | PostgreSQL |
+|----------|--------|-----------|
+| До 50 площадок | ✅ Работает | ✅ Избыточно |
+| 50–100 площадок | ⚠️ WAL справляется | ✅ Рекомендуется |
+| 100+ площадок | ❌ Блокировки при bulk-операциях | ✅ Необходим |
+
+**Конкретная проблема**: 500 агентов × heartbeat каждые 30 сек = ~17 write/сек. При autodiscover 64 каналов одна транзакция занимает ~200–500 мс и блокирует всех остальных (нет row-level locking в SQLite).
+
+**Миграция**: меняется только `DATABASE_URL` в `.env`. SQLAlchemy-модели совместимы с PostgreSQL без изменений.
+
+```env
+# SQLite (по умолчанию)
+DATABASE_URL=sqlite:////app/data/fleet.db
+
+# PostgreSQL (рекомендуется при >50 площадок)
+DATABASE_URL=postgresql://fleet:password@postgres:5432/fleet
+```
+
+### Шардирование MediaMTX
+
+При >100 площадок один инстанс MediaMTX упирается в ~200–300 одновременных RTSP-путей.
+
+**Механика шардирования** (уже заложена в архитектуре):
+
+1. `fleet-server` хранит `mtx_endpoint` per site в БД
+2. При деплое конфига агент получает свой endpoint: `rtsp://mtx-region1.example.com:8554`
+3. Агент пушит поток на назначенный MediaMTX инстанс
+4. UI запрашивает playback URL у `fleet-server`, который знает откуда тянуть HLS
+
+```
+Площадки 1–100  →  MediaMTX-1 (регион 1)
+Площадки 101–200 →  MediaMTX-2 (регион 2)
+fleet-server    →  роутер (знает mapping)
+```
+
+**SPOF**: fleet-server становится точкой маршрутизации. Решается его репликацией (stateless после перехода на PostgreSQL).
+
+**При переезде площадки между регионами**: нужен re-push (агент получает новый endpoint через `deploy config`, перезапускает go2rtc).
+
+### Ограничение одновременных сессий архива
+
+NVR Hikvision и Dahua имеют лимит одновременных ISAPI/ONVIF сессий (обычно 2–4 на устройство).
+
+В fleet-server реализован `asyncio.Semaphore(2)` per site — не более 2 одновременных archive RPC на площадку. При превышении клиент получает HTTP 429.
+
+```
+Настройка лимита: захардкожено в main.py
+_get_archive_semaphore(site_id, max_concurrent=2)
+```
+
+Если ваш NVR поддерживает больше сессий — увеличьте `max_concurrent`.
+
+### Туннель только TCP (UDP не поддерживается)
+
+Reverse TCP tunnel поддерживает только TCP-соединения.
+
+**Что не работает через туннель:**
+- UDP 3702 — WS-Discovery (автообнаружение устройств в iVMS-4200, SmartPSS)
+- Multicast-команды некоторых NVR
+
+**Что работает:**
+- Ручное добавление устройства по IP:PORT в толстом клиенте
+- RTSP (TCP), HTTP API, Control port — всё через туннель
+
+**Рекомендация**: при настройке iVMS-4200 или SmartPSS используйте ручное добавление:
+```
+Host: nvr.yourserver.com
+HTTP Port: [tunnel_http_port из панели]
+RTSP Port: [tunnel_rtsp_port из панели]
+Control Port: [tunnel_control_port из панели]
+```
+Автообнаружение (`Add by Device`) работать не будет.
+
+### Health-check агента
+
+**Application-level heartbeat**: агент отправляет `{"type":"heartbeat","uptime":...,"version":...}` каждые 30 секунд. fleet-server обновляет `agent.last_seen` в БД.
+
+**Детектирование offline**: площадка отмечается offline при разрыве WebSocket соединения. Дополнительно — ping/pong на уровне протокола каждые 30 секунд с таймаутом 10 секунд. Если агент не отвечает на ping — соединение закрывается принудительно.
+
+**Порог offline по времени**: `last_seen > 90 сек` → агент считается недоступным (2 пропущенных heartbeat + буфер).
+
+### TLS для RTSP (порт 8554)
+
+RTSP на порту 8554 работает в **plaintext** — без шифрования. Это сознательный компромисс: большинство NVR-клиентов и толстых клиентов (iVMS-4200, SmartPSS) не поддерживают RTSP over TLS.
+
+**Уровни защиты которые есть:**
+- Аутентификация: `viewer:VIEWER_PASS` для чтения, отдельный пользователь для публикации
+- HLS и WebRTC идут через Nginx с TLS (HTTPS)
+- Порт 8554 рекомендуется закрыть файрволом если RTSP не нужен извне
+
+**Если нужен зашифрованный RTSP**: используйте WebRTC через порт 8889 (WSS) — он идёт через Nginx и шифруется.
+
+### Graceful shutdown при обновлении
+
+`Drain + redeploy` на практике означает:
+1. Нажать кнопку **Drain + redeploy** в UI площадки
+2. fleet-server отправляет агенту `{"action":"drain"}` — агент перестаёт принимать новые archive RPC
+3. Текущие playback-сессии завершаются (или ждут таймаута 30 сек)
+4. fleet-server отправляет новый конфиг через `deploy config`
+5. Агент перезапускает go2rtc с новыми настройками
+
+**При `systemctl restart nvr-fleet-agent`**: активные archive playback сессии оборвутся. Live HLS прерывается на ~1–3 сек (время перезапуска go2rtc), затем восстанавливается автоматически.
