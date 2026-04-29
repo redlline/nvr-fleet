@@ -857,8 +857,18 @@ def collect_traffic() -> dict[str, dict]:
     for name, info in data.items():
         consumers = info.get("consumers", [])
         producers = info.get("producers", [])
-        rx = sum(item.get("recv", 0) for item in producers)
-        tx = sum(item.get("send", 0) for item in consumers)
+        # go2rtc stores bytes in receivers[] inside each producer
+        rx = 0
+        for p in producers:
+            for r in p.get("receivers", []):
+                rx += r.get("bytes", 0)
+            # fallback: top-level recv field (older go2rtc versions)
+            rx += p.get("recv", 0)
+        tx = 0
+        for c in consumers:
+            for s in c.get("senders", []):
+                tx += s.get("bytes", 0)
+            tx += c.get("send", 0)
         totals[public_stream_path(name)] = (rx, tx)
 
     result = {}
@@ -2126,3 +2136,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
