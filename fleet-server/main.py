@@ -1611,7 +1611,7 @@ def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(
 
 
 @app.get("/api/sites/{site_id}/traffic/mtx")
-def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_auth)):
+def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_admin)):
     """Traffic from MediaMTX metrics API (per site)."""
     try:
         resp = requests.get(
@@ -1626,7 +1626,7 @@ def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get
 
 
 @app.get("/api/traffic/total/mtx")
-def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_auth)):
+def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_admin)):
     """Traffic from MediaMTX metrics API (all sites)."""
     try:
         resp = requests.get(
@@ -2277,4 +2277,5 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
