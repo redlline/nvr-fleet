@@ -8,7 +8,8 @@ import TrafficChart from "../components/TrafficChart"
 const VENDOR_OPTIONS = [
   { value: "hikvision", label: "Hikvision" },
   { value: "dahua", label: "Dahua" },
-  { value: "onvif", label: "ONVIF" },
+  { value: "unv", label: "UNV / Uniview" },
+  { value: "onvif", label: "ONVIF (generic)" },
 ]
 
 function siteSummary(site) {
@@ -351,3 +352,4 @@ function EditSiteModal({ site, onClose, onSave }) {
     </div>
   )
 }
+
