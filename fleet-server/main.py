@@ -1907,6 +1907,14 @@ async def _deploy_config(site_id: str, db: Session) -> bool:
     if not site:
         return False
     cameras = db.query(Camera).filter_by(site_id=site_id).all()
+    mediamtx_changed = _rebuild_mediamtx(db)
+    if mediamtx_changed:
+        try:
+            await asyncio.to_thread(_restart_stack_services_now, ["mediamtx"])
+            await asyncio.sleep(2)
+        except Exception as exc:
+            logger.warning("MediaMTX restart after config rebuild failed: %s", exc)
+
     yaml_content = generate_go2rtc_yaml(site, [camera for camera in cameras if camera.enabled])
     sent = await send_to_agent(site_id, {
         "action": "update_config",
@@ -1931,11 +1939,27 @@ def _rebuild_mediamtx(db: Session):
         except OSError as exc:
             logger.warning("Skipping mediamtx rebuild in this environment: %s", exc)
             return
+    before = None
+    if os.path.exists(MEDIAMTX_YAML):
+        try:
+            with open(MEDIAMTX_YAML, encoding="utf-8") as fh:
+                before = fh.read()
+        except OSError:
+            before = None
+
     try:
         update_mediamtx_paths(MEDIAMTX_YAML, sites, cameras)
     except Exception as e:
         logger.error(f"mediamtx rebuild: {e}")
+        return False
 
+    after = None
+    try:
+        with open(MEDIAMTX_YAML, encoding="utf-8") as fh:
+            after = fh.read()
+    except OSError:
+        after = None
+    return before != after
 
 def _write_tls_files(fullchain_pem: str, privkey_pem: str) -> TlsCertificateInfo:
     cert_info = _load_tls_info_from_text(fullchain_pem, privkey_pem)

@@ -118,6 +118,8 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
         },
     ]
 
+    enabled_cameras = [camera for camera in cameras if getattr(camera, "enabled", False)]
+
     for site in sites:
         auth_users.append({
             "user": site_publish_user(site.id),
@@ -127,6 +129,10 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
                 {"action": "publish", "path": site_path_pattern(site.id)},
             ],
         })
+        for camera in enabled_cameras:
+            if camera.site_id != site.id:
+                continue
+            paths[public_stream_path(site.id, camera.channel)] = {}
 
     cfg["paths"] = paths
     cfg["authMethod"] = "internal"
