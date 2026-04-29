@@ -12,8 +12,8 @@ if [ ! -d "${ADDON_DIR}/.git" ]; then
   git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" "${ADDON_DIR}"
 else
   git -C "${ADDON_DIR}" fetch origin "${REPO_REF}" --depth 1
-  git -C "${ADDON_DIR}" checkout "${REPO_REF}"
-  git -C "${ADDON_DIR}" pull --ff-only origin "${REPO_REF}"
+  git -C "${ADDON_DIR}" reset --hard "origin/${REPO_REF}"
+  git -C "${ADDON_DIR}" clean -fd
 fi
 
 FRONTEND_NGINX_CONF="${ADDON_DIR}/frontend/nginx.conf"
@@ -52,40 +52,25 @@ patch_text(
 )
 
 patch_text(
-    "backend/app/api/streams.py",
-    '    if use_proxy:\n'
-    '        # Use nginx proxy path with node ID - works in Docker environment\n'
-    '        # nginx routes /hls/node1/, /hls/node3/ to different MediaMTX instances\n'
-    '        return f"/hls/node{node.id}"\n',
-    '    if use_proxy:\n'
-    '        # Use the local /hls proxy path. When toolkit is opened directly on :3001,\n'
-    '        # frontend nginx serves it. When toolkit is opened through /monitor/ on the\n'
-    '        # main domain, the same-origin request is handled by the main nginx /hls route.\n'
-    '        return "/hls"\n',
-)
-
-patch_text(
-    "backend/app/api/streams.py",
-    '    public_host = os.getenv("PUBLIC_HOST", "").strip()\n'
-    '    public_scheme = os.getenv("PUBLIC_SCHEME", "https").strip() or "https"\n'
-    '    if public_host:\n'
-    '        return f"{public_scheme}://{public_host}/hls"\n'
-    '\n'
-    '    if use_proxy:\n'
-    '        # Use nginx proxy path with node ID - works in Docker environment\n'
-    '        # nginx routes /hls/node1/, /hls/node3/ to different MediaMTX instances\n'
-    '        return f"/hls/node{node.id}"\n',
-    '    if use_proxy:\n'
-    '        # Use the local /hls proxy path. When toolkit is opened directly on :3001,\n'
-    '        # frontend nginx serves it. When toolkit is opened through /monitor/ on the\n'
-    '        # main domain, the same-origin request is handled by the main nginx /hls route.\n'
-    '        return "/hls"\n',
+    "backend/app/services/thumbnail_service.py",
+    '# HLS port (same as in streams.py)\nHLS_PORT = int(os.getenv("MEDIAMTX_HLS_PORT", "8893"))\n',
+    '# HLS proxy (go through fleet-server so auth and cookie handling stay centralized)\n'
+    'HLS_PROXY_BASE = os.getenv("MEDIAMTX_HLS_PROXY_BASE", "http://host.docker.internal:8765/hls").rstrip("/")\n'
+    'HLS_PORT = int(os.getenv("MEDIAMTX_HLS_PORT", "8888"))\n',
 )
 
 patch_text(
     "backend/app/services/thumbnail_service.py",
-    'HLS_PORT = int(os.getenv("MEDIAMTX_HLS_PORT", "8893"))\n',
-    'HLS_PORT = int(os.getenv("MEDIAMTX_HLS_PORT", "8888"))\n',
+    '    def _get_hls_url(self, stream_path: str, node_api_url: str) -> str:\n'
+    '        """Derive HLS URL from node API URL."""\n'
+    '        parsed = urlparse(node_api_url)\n'
+    '        return f"http://{parsed.hostname}:{HLS_PORT}/{stream_path}/index.m3u8"\n',
+    '    def _get_hls_url(self, stream_path: str, node_api_url: str) -> str:\n'
+    '        """Derive HLS URL from fleet proxy or node API URL."""\n'
+    '        if HLS_PROXY_BASE:\n'
+    '            return f"{HLS_PROXY_BASE}/{stream_path}/index.m3u8"\n'
+    '        parsed = urlparse(node_api_url)\n'
+    '        return f"http://{parsed.hostname}:{HLS_PORT}/{stream_path}/index.m3u8"\n',
 )
 PY
 

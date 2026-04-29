@@ -1,7 +1,5 @@
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
 import { api } from "../lib/api"
-
-const VIEWER_AUTH = "viewer:VIEWER_PASS@"
 
 export default function StreamsTab({ siteId, publicHost }) {
   const [streams, setStreams] = useState([])
@@ -11,25 +9,39 @@ export default function StreamsTab({ siteId, publicHost }) {
 
   async function load() {
     try {
-      const [s, c] = await Promise.all([api.getStreams(siteId), api.listCameras(siteId)])
-      setStreams(s)
-      setCameras(c.filter(c => c.enabled))
-    } catch (e) { console.error(e) }
-    finally { setLoading(false) }
+      const [streamData, cameraData] = await Promise.all([
+        api.getStreams(siteId),
+        api.listCameras(siteId),
+      ])
+      setStreams(streamData)
+      setCameras(cameraData.filter((camera) => camera.enabled))
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t) }, [siteId])
+  useEffect(() => {
+    load()
+    const timer = setInterval(load, 10000)
+    return () => clearInterval(timer)
+  }, [siteId])
 
   if (loading) return <div className="empty-state"><div className="spinner" /></div>
 
-  // merge cameras with stream status
-  const rows = cameras.map(cam => {
-    const path   = `site${siteId}/cam${String(cam.channel).padStart(2, "0")}`
-    const stat   = streams.find(s => s.stream_path === path)
-    return { cam, path, ready: stat?.ready ?? false, updated: stat?.updated }
+  const rows = cameras.map((camera) => {
+    const path = `site${siteId}/cam${String(camera.channel).padStart(2, "0")}`
+    const streamStat = streams.find((item) => item.stream_path === path)
+    return {
+      camera,
+      path,
+      ready: streamStat?.ready ?? false,
+      updated: streamStat?.updated,
+    }
   })
 
-  const onlineCount = rows.filter(r => r.ready).length
+  const onlineCount = rows.filter((row) => row.ready).length
 
   return (
     <div>
@@ -37,7 +49,7 @@ export default function StreamsTab({ siteId, publicHost }) {
         <span className={`badge ${onlineCount > 0 ? "badge-green" : "badge-gray"}`}>
           {onlineCount} / {rows.length} live
         </span>
-        <button className="btn btn-ghost btn-sm" onClick={load}>↻ Refresh</button>
+        <button className="btn btn-ghost btn-sm" onClick={load}>Refresh</button>
       </div>
 
       <div className="table-wrap">
@@ -49,7 +61,7 @@ export default function StreamsTab({ siteId, publicHost }) {
               <th>Stream path</th>
               <th>RTSP URL</th>
               <th>HLS URL</th>
-              <th>WebRTC</th>
+              <th>Watch</th>
               <th>Updated</th>
             </tr>
           </thead>
@@ -57,13 +69,13 @@ export default function StreamsTab({ siteId, publicHost }) {
             {rows.length === 0 && (
               <tr><td colSpan={7} className="empty-state">No enabled cameras</td></tr>
             )}
-            {rows.map(({ cam, path, ready, updated }) => {
-              const rtsp    = `rtsp://${VIEWER_AUTH}${publicHost}:8554/${path}`
-              const hls     = `${webScheme}://${VIEWER_AUTH}${publicHost}/hls/${path}/index.m3u8`
-              const webrtc  = `${webScheme}://${VIEWER_AUTH}${publicHost}/webrtc/${path}`
+            {rows.map(({ camera, path, ready, updated }) => {
+              const rtsp = `rtsp://viewer:VIEWER_PASS@${publicHost}:8554/${path}`
+              const hls = `${webScheme}://${publicHost}/hls/${path}/index.m3u8`
+              const watchUrl = `/?page=watch&site=${encodeURIComponent(siteId)}&watch=${encodeURIComponent(path)}&label=${encodeURIComponent(camera.name || `Cam ${camera.channel}`)}`
 
               return (
-                <tr key={cam.id}>
+                <tr key={camera.id}>
                   <td>
                     <span className={`badge ${ready ? "badge-green" : "badge-red"}`}>
                       <span className={`dot ${ready ? "dot-green" : "dot-red"}`} />
@@ -71,8 +83,8 @@ export default function StreamsTab({ siteId, publicHost }) {
                     </span>
                   </td>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{cam.name || `Cam ${cam.channel}`}</div>
-                    <div style={{ fontSize: 11, color: "var(--text2)" }}>CH {cam.channel} · {cam.stream_type}</div>
+                    <div style={{ fontWeight: 500 }}>{camera.name || `Cam ${camera.channel}`}</div>
+                    <div style={{ fontSize: 11, color: "var(--text2)" }}>CH {camera.channel} · {camera.stream_type}</div>
                   </td>
                   <td>
                     <code style={{ fontSize: 11 }}>{path}</code>
@@ -84,9 +96,14 @@ export default function StreamsTab({ siteId, publicHost }) {
                     <CopyField value={hls} label="HLS" />
                   </td>
                   <td>
-                    <a href={webrtc} target="_blank" rel="noreferrer"
-                      className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}>
-                      ▶ Watch
+                    <a
+                      href={watchUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 11 }}
+                    >
+                      Watch
                     </a>
                   </td>
                   <td style={{ color: "var(--text2)", fontSize: 11 }}>
@@ -104,15 +121,21 @@ export default function StreamsTab({ siteId, publicHost }) {
 
 function CopyField({ value, label }) {
   const [copied, setCopied] = useState(false)
+
   function copy() {
     navigator.clipboard.writeText(value)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
+
   return (
-    <button className="btn btn-ghost btn-sm" onClick={copy}
-      title={value} style={{ fontSize: 11, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
-      {copied ? "✅ Copied" : `📋 ${label}`}
+    <button
+      className="btn btn-ghost btn-sm"
+      onClick={copy}
+      title={value}
+      style={{ fontSize: 11, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}
+    >
+      {copied ? "Copied" : label}
     </button>
   )
 }

@@ -56,13 +56,13 @@ server {
     }
 
     location /hls/ {
-        proxy_pass http://host.docker.internal:8888/;
-        proxy_set_header Authorization "Basic dmlld2VyOlZJRVdFUl9QQVNT";
-        proxy_redirect / /hls/;
-        proxy_cookie_path / /hls/;
+        proxy_pass http://fleet-server:8765/hls/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         add_header Cache-Control no-cache always;
         add_header Access-Control-Allow-Origin * always;
-        add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
         add_header Access-Control-Allow-Headers "Range" always;
         add_header Access-Control-Expose-Headers "Content-Length, Content-Range" always;
         if (\$request_method = OPTIONS) {
@@ -140,13 +140,13 @@ server {
     }
 
     location /hls/ {
-        proxy_pass http://host.docker.internal:8888/;
-        proxy_set_header Authorization "Basic dmlld2VyOlZJRVdFUl9QQVNT";
-        proxy_redirect / /hls/;
-        proxy_cookie_path / /hls/;
+        proxy_pass http://fleet-server:8765/hls/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         add_header Cache-Control no-cache always;
         add_header Access-Control-Allow-Origin * always;
-        add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
         add_header Access-Control-Allow-Headers "Range" always;
         add_header Access-Control-Expose-Headers "Content-Length, Content-Range" always;
         if (\$request_method = OPTIONS) {

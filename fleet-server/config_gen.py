@@ -141,6 +141,9 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
     cfg["apiAddress"] = ":9997"
     cfg["metrics"] = True
     cfg["metricsAddress"] = ":9998"
+    cfg["hls"] = True
+    cfg["hlsAddress"] = ":8888"
+    cfg["hlsAlwaysRemux"] = True
 
     path_defaults = cfg.get("pathDefaults", {}) or {}
     for legacy_key in ("publishUser", "publishPass", "publishIPs", "readUser", "readPass", "readIPs"):

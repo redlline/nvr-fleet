@@ -10,15 +10,18 @@ import socket
 import ssl
 import subprocess
 import tempfile
+import time
 import uuid
 import zipfile
+from http.cookies import SimpleCookie
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, status, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Request, status, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -107,6 +110,7 @@ MTX_TOOLKIT_API = os.environ.get("MTX_TOOLKIT_API", "http://host.docker.internal
 MTX_TOOLKIT_RTSP_URL = os.environ.get("MTX_TOOLKIT_RTSP_URL", f"rtsp://viewer:VIEWER_PASS@host.docker.internal:{RTSP_PORT}")
 MTX_TOOLKIT_NODE_NAME = os.environ.get("MTX_TOOLKIT_NODE_NAME", f"MediaMTX {PUBLIC_HOST}")
 MTX_TOOLKIT_ENVIRONMENT = os.environ.get("MTX_TOOLKIT_ENVIRONMENT", "production")
+MEDIAMTX_HLS_PROXY_TARGET = os.environ.get("MEDIAMTX_HLS_PROXY_TARGET", "http://host.docker.internal:8888").rstrip("/")
 TUNNEL_HTTP_START = int(os.environ.get("TUNNEL_HTTP_START", "20080"))
 TUNNEL_HTTP_END = int(os.environ.get("TUNNEL_HTTP_END", "20179"))
 TUNNEL_CONTROL_START = int(os.environ.get("TUNNEL_CONTROL_START", "28000"))
@@ -189,6 +193,14 @@ def _public_scheme() -> str:
 
 def _public_base_url() -> str:
     return f"{_public_scheme()}://{PUBLIC_HOST}"
+
+
+def _public_hls_url(stream_path: str) -> str:
+    return f"{_public_base_url()}/hls/{stream_path}/index.m3u8"
+
+
+def _public_webrtc_url(stream_path: str) -> str:
+    return f"{_public_base_url()}/webrtc/{stream_path}"
 
 
 def _ws_scheme() -> str:
@@ -1651,8 +1663,8 @@ async def start_archive_playback(
         stream_path=stream_path,
         vendor=reply.get("vendor", site.nvr_vendor),
         rtsp_url=f"rtsp://viewer:VIEWER_PASS@{PUBLIC_HOST}:{RTSP_PORT}/{stream_path}",
-        hls_url=f"{_public_scheme()}://viewer:VIEWER_PASS@{PUBLIC_HOST}/hls/{stream_path}/index.m3u8",
-        webrtc_url=f"{_public_scheme()}://viewer:VIEWER_PASS@{PUBLIC_HOST}/webrtc/{stream_path}",
+        hls_url=_public_hls_url(stream_path),
+        webrtc_url=_public_webrtc_url(stream_path),
         expires_at=datetime.fromisoformat(reply["expires_at"]),
     )
 
@@ -1892,6 +1904,25 @@ def get_map_data(db: Session = Depends(get_db), _=Depends(require_admin)):
 
 # ─── Install script endpoint ──────────────────────────────────────────────────
 
+@app.api_route("/hls/{proxy_path:path}", methods=["GET", "HEAD", "OPTIONS"])
+def hls_proxy(proxy_path: str, request: Request):
+    if request.method == "OPTIONS":
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                "Access-Control-Allow-Headers": "Range",
+            },
+        )
+    return _hls_proxy_request(
+        proxy_path,
+        str(request.query_params),
+        method=request.method,
+        range_header=request.headers.get("range", ""),
+    )
+
+
 @app.get("/install.sh", response_class=PlainTextResponse)
 def install_script():
     with open(INSTALL_SCRIPT_PATH, encoding="utf-8") as fh:
@@ -1966,6 +1997,131 @@ def _rebuild_mediamtx(db: Session):
     except OSError:
         after = None
     return before != after
+
+
+def _viewer_basic_auth() -> str:
+    token = base64.b64encode(b"viewer:VIEWER_PASS").decode("ascii")
+    return f"Basic {token}"
+
+
+def _normalize_hls_upstream_url(location: str, current_url: str) -> str:
+    next_url = urljoin(current_url, location)
+    parsed = urlsplit(next_url)
+    upstream = urlsplit(MEDIAMTX_HLS_PROXY_TARGET)
+    path = parsed.path or "/"
+    if path.startswith("/hls/"):
+        path = path[4:] or "/"
+    return urlunsplit((
+        upstream.scheme,
+        upstream.netloc,
+        path,
+        parsed.query,
+        parsed.fragment,
+    ))
+
+
+def _merge_set_cookie(cookie_jar: dict[str, str], headers) -> None:
+    for raw_cookie in headers.get_all("Set-Cookie", []):
+        parsed = SimpleCookie()
+        parsed.load(raw_cookie)
+        for morsel in parsed.values():
+            cookie_jar[morsel.key] = morsel.value
+
+
+def _is_hls_muxer_pending(proxy_path: str, status_code: int, content: bytes, media_type: str) -> bool:
+    if not proxy_path.endswith(".m3u8"):
+        return False
+    if status_code not in {200, 404}:
+        return False
+    if "json" not in media_type and "text/plain" not in media_type:
+        return False
+    body = content.decode("utf-8", errors="ignore").lower()
+    return "muxer instance not available" in body
+
+
+def _hls_proxy_request(proxy_path: str, query_string: str, method: str = "GET", range_header: str = "") -> Response:
+    import urllib.error
+    import urllib.request
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    safe_path = proxy_path.lstrip("/")
+    current_url = f"{MEDIAMTX_HLS_PROXY_TARGET}/{safe_path}"
+    if query_string:
+        current_url = f"{current_url}?{query_string}"
+
+    cookies: dict[str, str] = {}
+    opener = urllib.request.build_opener(_NoRedirect)
+
+    attempt_count = 1 if method == "HEAD" else 8
+    last_payload: tuple[int, bytes, str, dict[str, str]] | None = None
+
+    for attempt in range(attempt_count):
+        attempt_url = current_url
+        for _ in range(6):
+            request_headers = {
+                "Authorization": _viewer_basic_auth(),
+                "User-Agent": "NVR-Fleet-HLS-Proxy/1.0",
+            }
+            if range_header:
+                request_headers["Range"] = range_header
+            if cookies:
+                request_headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in cookies.items())
+            req = urllib.request.Request(attempt_url, headers=request_headers, method=method)
+            try:
+                upstream = opener.open(req, timeout=10)
+            except urllib.error.HTTPError as exc:
+                upstream = exc
+            except Exception as exc:
+                raise HTTPException(502, f"HLS proxy upstream error: {exc}") from exc
+
+            status_code = getattr(upstream, "status", getattr(upstream, "code", 502))
+            _merge_set_cookie(cookies, upstream.headers)
+            if 300 <= status_code < 400 and upstream.headers.get("Location"):
+                attempt_url = _normalize_hls_upstream_url(upstream.headers["Location"], attempt_url)
+                continue
+
+            content = b"" if method == "HEAD" else upstream.read()
+            media_type = upstream.headers.get_content_type()
+            response_headers = {
+                "Cache-Control": upstream.headers.get("Cache-Control", "no-cache"),
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                "Access-Control-Allow-Headers": "Range",
+                "Access-Control-Expose-Headers": "Content-Length, Content-Range",
+            }
+            for header_name in ("Content-Range", "Accept-Ranges"):
+                value = upstream.headers.get(header_name)
+                if value:
+                    response_headers[header_name] = value
+
+            if attempt < attempt_count - 1 and _is_hls_muxer_pending(proxy_path, status_code, content, media_type):
+                time.sleep(0.35 * (attempt + 1))
+                current_url = attempt_url
+                last_payload = (status_code, content, media_type, response_headers)
+                break
+
+            return Response(
+                content=content,
+                status_code=status_code,
+                media_type=media_type,
+                headers=response_headers,
+            )
+        else:
+            raise HTTPException(502, "HLS proxy exceeded redirect limit")
+
+    if last_payload is not None:
+        status_code, content, media_type, response_headers = last_payload
+        return Response(
+            content=content,
+            status_code=status_code,
+            media_type=media_type,
+            headers=response_headers,
+        )
+
+    raise HTTPException(502, "HLS proxy did not return a response")
 
 def _write_tls_files(fullchain_pem: str, privkey_pem: str) -> TlsCertificateInfo:
     cert_info = _load_tls_info_from_text(fullchain_pem, privkey_pem)

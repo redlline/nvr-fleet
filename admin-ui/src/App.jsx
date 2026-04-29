@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { api } from "./lib/api"
 import Dashboard from "./pages/Dashboard"
 import Sites from "./pages/Sites"
@@ -7,29 +7,92 @@ import NetworkMap from "./pages/NetworkMap"
 import Traffic from "./pages/Traffic"
 import System from "./pages/System"
 import Login from "./pages/Login"
+import WatchPage from "./pages/WatchPage"
+
+function readRoute() {
+  const url = new URL(window.location.href)
+  const page = url.searchParams.get("page")
+  const selectedSite = url.searchParams.get("site")
+  const watchPath = url.searchParams.get("watch")
+  const watchLabel = url.searchParams.get("label") || watchPath || ""
+
+  if (watchPath) {
+    return { page: "watch", selectedSite, watchPath, watchLabel }
+  }
+
+  if (page === "site" && selectedSite) {
+    return { page: "site", selectedSite, watchPath: "", watchLabel: "" }
+  }
+
+  const allowedPages = new Set(["dashboard", "sites", "map", "traffic", "system"])
+  return {
+    page: allowedPages.has(page) ? page : "dashboard",
+    selectedSite: null,
+    watchPath: "",
+    watchLabel: "",
+  }
+}
+
+function writeRoute(nextPage, selectedSite = null, watchPath = "", watchLabel = "") {
+  const url = new URL(window.location.href)
+  url.search = ""
+
+  if (nextPage === "site" && selectedSite) {
+    url.searchParams.set("page", "site")
+    url.searchParams.set("site", selectedSite)
+  } else if (nextPage === "watch" && watchPath) {
+    url.searchParams.set("page", "watch")
+    url.searchParams.set("watch", watchPath)
+    if (selectedSite) url.searchParams.set("site", selectedSite)
+    if (watchLabel) url.searchParams.set("label", watchLabel)
+  } else if (nextPage !== "dashboard") {
+    url.searchParams.set("page", nextPage)
+  }
+
+  window.history.pushState({}, "", url.toString())
+}
 
 export default function App() {
   const [authed, setAuthed] = useState(!!api.getToken())
-  const [page, setPage] = useState("dashboard")
-  const [selectedSite, setSelectedSite] = useState(null)
+  const [route, setRoute] = useState(() => readRoute())
+
+  useEffect(() => {
+    const onPopState = () => setRoute(readRoute())
+    window.addEventListener("popstate", onPopState)
+    return () => window.removeEventListener("popstate", onPopState)
+  }, [])
 
   if (!authed) return <Login onLogin={() => setAuthed(true)} />
 
-  function navigate(nextPage, site = null) {
-    setPage(nextPage)
-    if (site) setSelectedSite(site)
+  function navigate(nextPage, site = null, extra = {}) {
+    const nextRoute = {
+      page: nextPage,
+      selectedSite: site,
+      watchPath: extra.watchPath || "",
+      watchLabel: extra.watchLabel || "",
+    }
+    setRoute(nextRoute)
+    writeRoute(nextRoute.page, nextRoute.selectedSite, nextRoute.watchPath, nextRoute.watchLabel)
   }
 
   return (
     <div className="app">
-      <Sidebar page={page} navigate={navigate} />
+      <Sidebar page={route.page} navigate={navigate} />
       <main className="content">
-        {page === "dashboard" && <Dashboard navigate={navigate} />}
-        {page === "sites" && <Sites navigate={navigate} />}
-        {page === "site" && selectedSite && <SiteDetail siteId={selectedSite} navigate={navigate} />}
-        {page === "map" && <NetworkMap navigate={navigate} />}
-        {page === "traffic" && <Traffic />}
-        {page === "system" && <System />}
+        {route.page === "dashboard" && <Dashboard navigate={navigate} />}
+        {route.page === "sites" && <Sites navigate={navigate} />}
+        {route.page === "site" && route.selectedSite && <SiteDetail siteId={route.selectedSite} navigate={navigate} />}
+        {route.page === "watch" && route.watchPath && (
+          <WatchPage
+            siteId={route.selectedSite}
+            streamPath={route.watchPath}
+            streamLabel={route.watchLabel}
+            navigate={navigate}
+          />
+        )}
+        {route.page === "map" && <NetworkMap navigate={navigate} />}
+        {route.page === "traffic" && <Traffic />}
+        {route.page === "system" && <System />}
       </main>
     </div>
   )
