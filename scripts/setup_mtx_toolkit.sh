@@ -52,6 +52,23 @@ patch_text(
 )
 
 patch_text(
+    "backend/app/api/streams.py",
+    '    if use_proxy:\n'
+    '        # Use nginx proxy path with node ID - works in Docker environment\n'
+    '        # nginx routes /hls/node1/, /hls/node3/ to different MediaMTX instances\n'
+    '        return f"/hls/node{node.id}"\n',
+    '    public_host = os.getenv("PUBLIC_HOST", "").strip()\n'
+    '    public_scheme = os.getenv("PUBLIC_SCHEME", "https").strip() or "https"\n'
+    '    if public_host:\n'
+    '        return f"{public_scheme}://{public_host}/hls"\n'
+    '\n'
+    '    if use_proxy:\n'
+    '        # Use nginx proxy path with node ID - works in Docker environment\n'
+    '        # nginx routes /hls/node1/, /hls/node3/ to different MediaMTX instances\n'
+    '        return f"/hls/node{node.id}"\n',
+)
+
+patch_text(
     "backend/app/services/thumbnail_service.py",
     'HLS_PORT = int(os.getenv("MEDIAMTX_HLS_PORT", "8893"))\n',
     'HLS_PORT = int(os.getenv("MEDIAMTX_HLS_PORT", "8888"))\n',

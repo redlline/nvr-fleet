@@ -58,10 +58,15 @@ server {
     location /hls/ {
         proxy_pass http://host.docker.internal:8888/;
         proxy_set_header Authorization "Basic dmlld2VyOlZJRVdFUl9QQVNT";
-        proxy_redirect ~^http://[^/]+/(.*)$ /hls/$1;
-        proxy_redirect ~^/(.*)$ /hls/$1;
-        add_header Cache-Control no-cache;
-        add_header Access-Control-Allow-Origin *;
+        proxy_redirect / /hls/;
+        add_header Cache-Control no-cache always;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Range" always;
+        add_header Access-Control-Expose-Headers "Content-Length, Content-Range" always;
+        if (\$request_method = OPTIONS) {
+            return 204;
+        }
     }
 
     location /webrtc/ {
@@ -136,10 +141,15 @@ server {
     location /hls/ {
         proxy_pass http://host.docker.internal:8888/;
         proxy_set_header Authorization "Basic dmlld2VyOlZJRVdFUl9QQVNT";
-        proxy_redirect ~^http://[^/]+/(.*)$ /hls/$1;
-        proxy_redirect ~^/(.*)$ /hls/$1;
-        add_header Cache-Control no-cache;
-        add_header Access-Control-Allow-Origin *;
+        proxy_redirect / /hls/;
+        add_header Cache-Control no-cache always;
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Range" always;
+        add_header Access-Control-Expose-Headers "Content-Length, Content-Range" always;
+        if (\$request_method = OPTIONS) {
+            return 204;
+        }
     }
 
     location /webrtc/ {

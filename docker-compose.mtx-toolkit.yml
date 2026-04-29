@@ -11,6 +11,8 @@ services:
       FLASK_ENV: production
       DATABASE_URL: postgresql://mtx:mtx_password@mtx-toolkit-postgres:5432/mtx_toolkit
       REDIS_URL: redis://mtx-toolkit-redis:6379/0
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      PUBLIC_SCHEME: ${PUBLIC_SCHEME:-https}
       MEDIAMTX_API_URL: http://mediamtx-internal:MEDIAMTX_INTERNAL_PASS@host.docker.internal:9997
       MEDIAMTX_RTSP_URL: rtsp://viewer:VIEWER_PASS@host.docker.internal:8554
       MEDIAMTX_HLS_PORT: "8888"
@@ -75,6 +77,8 @@ services:
       FLASK_ENV: production
       DATABASE_URL: postgresql://mtx:mtx_password@mtx-toolkit-postgres:5432/mtx_toolkit
       REDIS_URL: redis://mtx-toolkit-redis:6379/0
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      PUBLIC_SCHEME: ${PUBLIC_SCHEME:-https}
       MEDIAMTX_API_URL: http://mediamtx-internal:MEDIAMTX_INTERNAL_PASS@host.docker.internal:9997
       MEDIAMTX_RTSP_URL: rtsp://viewer:VIEWER_PASS@host.docker.internal:8554
       MEDIAMTX_HLS_PORT: "8888"
