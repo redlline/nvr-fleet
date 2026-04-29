@@ -1702,10 +1702,48 @@ def _parse_mtx_metrics(site_id, hours: int):
 
 async def _mtx_metrics_poll_loop():
     """Background loop: poll MediaMTX metrics every 30s."""
+    global _mtx_samples, _mtx_last_poll
     await asyncio.sleep(10)  # initial delay
     while True:
         try:
-            await asyncio.to_thread(_poll_mtx_metrics)
+            import re as _re
+            _target = MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')
+            _resp = await asyncio.to_thread(
+                lambda: requests.get(
+                    f"{_target}/metrics",
+                    auth=(mediamtx_internal_api_user(), mediamtx_internal_api_pass()),
+                    timeout=3,
+                )
+            )
+            _resp.raise_for_status()
+            _now = datetime.utcnow()
+            _rx = {}
+            _tx = {}
+            for _line in _resp.text.splitlines():
+                if _line.startswith("#") or not _line.strip():
+                    continue
+                _m = _re.match(r'paths_bytes_received\{name="([^"]+)"[^}]*\}\s+([\d.]+)', _line)
+                if _m:
+                    _rx[_m.group(1)] = int(float(_m.group(2)))
+                _m = _re.match(r'paths_bytes_sent\{name="([^"]+)"[^}]*\}\s+([\d.]+)', _line)
+                if _m:
+                    _tx[_m.group(1)] = int(float(_m.group(2)))
+            _all = set(list(_rx.keys()) + list(_tx.keys()))
+            for _path in _all:
+                _prev = _mtx_last_poll.get(_path, {})
+                _drx = max(_rx.get(_path, 0) - _prev.get("rx", _rx.get(_path, 0)), 0)
+                _dtx = max(_tx.get(_path, 0) - _prev.get("tx", _tx.get(_path, 0)), 0)
+                _mtx_samples.append({
+                    "ts": _now.isoformat() + "Z",
+                    "rx_bytes": _drx,
+                    "tx_bytes": _dtx,
+                    "stream_path": _path,
+                })
+            _cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
+            _mtx_samples = [s for s in _mtx_samples if s["ts"] >= _cutoff]
+            _mtx_last_poll = {p: {"rx": _rx.get(p, 0), "tx": _tx.get(p, 0)} for p in _all}
+            _mtx_last_poll["__ts__"] = datetime.utcnow().timestamp()
+            logger.debug("MTX poll: %d paths, samples=%d", len(_all), len(_mtx_samples))
         except Exception as exc:
             logger.debug("MTX metrics poll error: %s", exc)
         await asyncio.sleep(30)
@@ -2358,6 +2396,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
