@@ -103,6 +103,10 @@ TLS_CERT_DIR = os.environ.get("TLS_CERT_DIR", "/app/tls")
 TLS_FULLCHAIN_PATH = os.environ.get("TLS_FULLCHAIN_PATH", os.path.join(TLS_CERT_DIR, "fullchain.pem"))
 TLS_PRIVKEY_PATH = os.environ.get("TLS_PRIVKEY_PATH", os.path.join(TLS_CERT_DIR, "privkey.pem"))
 PUBLIC_WEB_SCHEME = os.environ.get("PUBLIC_WEB_SCHEME", "").strip().lower()
+MTX_TOOLKIT_API = os.environ.get("MTX_TOOLKIT_API", "http://host.docker.internal:5002").rstrip("/")
+MTX_TOOLKIT_RTSP_URL = os.environ.get("MTX_TOOLKIT_RTSP_URL", f"rtsp://host.docker.internal:{RTSP_PORT}")
+MTX_TOOLKIT_NODE_NAME = os.environ.get("MTX_TOOLKIT_NODE_NAME", f"MediaMTX {PUBLIC_HOST}")
+MTX_TOOLKIT_ENVIRONMENT = os.environ.get("MTX_TOOLKIT_ENVIRONMENT", "production")
 TUNNEL_HTTP_START = int(os.environ.get("TUNNEL_HTTP_START", "20080"))
 TUNNEL_HTTP_END = int(os.environ.get("TUNNEL_HTTP_END", "20179"))
 TUNNEL_CONTROL_START = int(os.environ.get("TUNNEL_CONTROL_START", "28000"))
@@ -1128,6 +1132,7 @@ async def startup_event() -> None:
     try:
         _rebuild_mediamtx(db)
         await _sync_tunnel_listeners(db)
+        await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
     finally:
         db.close()
 
@@ -1192,6 +1197,7 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
             elif mtype == "stream_status":
                 _update_stream_stats(site_id, msg.get("streams", {}), db)
                 db.commit()
+                asyncio.create_task(_schedule_mtx_toolkit_sync(1.5))
 
             elif mtype in {"tcp_data", "tcp_close"}:
                 await tunnel_manager.handle_agent_message(site_id, msg)
@@ -1212,6 +1218,7 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
                 future.set_result({"ok": False, "error": "Agent disconnected"})
         await tunnel_manager.close_site_connections(site_id)
         db.commit()
+        asyncio.create_task(_schedule_mtx_toolkit_sync(0.5))
         logger.info(f"Agent disconnected: {site_id}")
 
 
@@ -1901,12 +1908,17 @@ async def _deploy_config(site_id: str, db: Session) -> bool:
         return False
     cameras = db.query(Camera).filter_by(site_id=site_id).all()
     yaml_content = generate_go2rtc_yaml(site, [camera for camera in cameras if camera.enabled])
-    return await send_to_agent(site_id, {
+    sent = await send_to_agent(site_id, {
         "action": "update_config",
         "go2rtc_yaml": yaml_content,
         "site": _site_payload(site),
         "cameras": [_camera_payload(camera) for camera in cameras],
     })
+    if sent:
+        asyncio.create_task(_schedule_mtx_toolkit_sync(4.0))
+    else:
+        asyncio.create_task(_schedule_mtx_toolkit_sync(1.0))
+    return sent
 
 
 def _rebuild_mediamtx(db: Session):
@@ -1936,3 +1948,75 @@ def _write_tls_files(fullchain_pem: str, privkey_pem: str) -> TlsCertificateInfo
     os.replace(fullchain_tmp, TLS_FULLCHAIN_PATH)
     os.replace(privkey_tmp, TLS_PRIVKEY_PATH)
     return cert_info
+
+
+def _mtx_toolkit_request(path: str, *, method: str = "GET", data: Optional[dict] = None, timeout: int = 5):
+    import urllib.error
+    import urllib.request
+
+    if not MTX_TOOLKIT_API:
+        raise RuntimeError("MTX Toolkit API URL is not configured")
+
+    body = None
+    headers = {"Accept": "application/json"}
+    if data is not None:
+        body = json.dumps(data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(f"{MTX_TOOLKIT_API}{path}", data=body, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        raw = response.read()
+        if not raw:
+            return None
+        return json.loads(raw)
+
+
+def _ensure_mtx_toolkit_node() -> Optional[int]:
+    try:
+        payload = _mtx_toolkit_request("/api/fleet/nodes?active_only=false")
+    except Exception as exc:
+        logger.info("MTX Toolkit node bootstrap skipped: %s", exc)
+        return None
+
+    nodes = payload.get("nodes", []) if isinstance(payload, dict) else []
+    node_data = {
+        "name": MTX_TOOLKIT_NODE_NAME,
+        "api_url": MEDIAMTX_API,
+        "rtsp_url": MTX_TOOLKIT_RTSP_URL,
+        "environment": MTX_TOOLKIT_ENVIRONMENT,
+        "is_active": True,
+    }
+
+    for node in nodes:
+        if node.get("name") == MTX_TOOLKIT_NODE_NAME or node.get("api_url") == MEDIAMTX_API:
+            node_id = int(node["id"])
+            try:
+                _mtx_toolkit_request(f"/api/fleet/nodes/{node_id}", method="PUT", data=node_data)
+            except Exception as exc:
+                logger.info("MTX Toolkit node update skipped: %s", exc)
+                return None
+            return node_id
+
+    try:
+        created = _mtx_toolkit_request("/api/fleet/nodes", method="POST", data=node_data)
+    except Exception as exc:
+        logger.info("MTX Toolkit node creation skipped: %s", exc)
+        return None
+    if isinstance(created, dict) and created.get("id"):
+        return int(created["id"])
+    return None
+
+
+def _sync_mtx_toolkit_node_streams() -> None:
+    node_id = _ensure_mtx_toolkit_node()
+    if not node_id:
+        return
+    try:
+        _mtx_toolkit_request(f"/api/fleet/nodes/{node_id}/sync", method="POST", data={})
+    except Exception as exc:
+        logger.info("MTX Toolkit stream sync skipped: %s", exc)
+
+
+async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
+    await asyncio.sleep(delay)
+    await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
