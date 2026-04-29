@@ -1686,6 +1686,7 @@ def _poll_mtx_metrics():
         path: {"rx": rx_bytes.get(path, 0), "tx": tx_bytes.get(path, 0)}
         for path in all_paths
     }
+    _mtx_last_poll["__ts__"] = datetime.utcnow().timestamp()
 
 
 def _parse_mtx_metrics(site_id, hours: int):
@@ -2357,6 +2358,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
