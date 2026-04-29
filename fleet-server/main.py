@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import requests
 import secrets
 import socket
 import ssl
@@ -1708,8 +1709,9 @@ async def _mtx_metrics_poll_loop():
         try:
             import re as _re
             _target = MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')
+            import requests as _requests
             _resp = await asyncio.to_thread(
-                lambda: requests.get(
+                lambda: _requests.get(
                     f"{_target}/metrics",
                     auth=(mediamtx_internal_api_user(), mediamtx_internal_api_pass()),
                     timeout=3,
@@ -2396,6 +2398,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
