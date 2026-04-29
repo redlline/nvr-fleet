@@ -1609,6 +1609,77 @@ def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(
     return [TrafficOut.model_validate(s) for s in samples]
 
 
+
+@app.get("/api/sites/{site_id}/traffic/mtx")
+def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_auth)):
+    """Traffic from MediaMTX metrics API (per site)."""
+    try:
+        resp = requests.get(
+            f"{MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')}/metrics",
+            timeout=3,
+        )
+        resp.raise_for_status()
+        samples = _parse_mtx_metrics(resp.text, site_id, hours)
+        return samples
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/traffic/total/mtx")
+def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_auth)):
+    """Traffic from MediaMTX metrics API (all sites)."""
+    try:
+        resp = requests.get(
+            f"{MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')}/metrics",
+            timeout=3,
+        )
+        resp.raise_for_status()
+        samples = _parse_mtx_metrics(resp.text, None, hours)
+        return samples
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+def _parse_mtx_metrics(metrics_text: str, site_id, hours: int):
+    """Parse MediaMTX Prometheus metrics into traffic samples."""
+    import re
+    from datetime import timezone
+    now = datetime.utcnow()
+    cutoff = now - timedelta(hours=hours)
+
+    rx_bytes = {}
+    tx_bytes = {}
+
+    for line in metrics_text.splitlines():
+        if line.startswith("#"):
+            continue
+        m = re.match(r'mediamtx_path_reader_bytes_received\{.*?path="([^"]+)".*?\}\s+([\d.]+)', line)
+        if m:
+            path, val = m.group(1), float(m.group(2))
+            if site_id is None or path.startswith(f"site{site_id}/"):
+                rx_bytes[path] = rx_bytes.get(path, 0) + int(val)
+        m = re.match(r'mediamtx_path_reader_bytes_sent\{.*?path="([^"]+)".*?\}\s+([\d.]+)', line)
+        if m:
+            path, val = m.group(1), float(m.group(2))
+            if site_id is None or path.startswith(f"site{site_id}/"):
+                tx_bytes[path] = tx_bytes.get(path, 0) + int(val)
+
+    if not rx_bytes and not tx_bytes:
+        return []
+
+    all_paths = set(list(rx_bytes.keys()) + list(tx_bytes.keys()))
+    samples = []
+    for path in all_paths:
+        samples.append({
+            "ts": now.isoformat() + "Z",
+            "rx_bytes": rx_bytes.get(path, 0),
+            "tx_bytes": tx_bytes.get(path, 0),
+            "stream_path": path,
+            "site_id": site_id or "",
+        })
+    return samples
+
+
 @app.get("/api/sites/{site_id}/archive", response_model=list[ArchiveRecordingOut])
 async def list_archive(
     site_id: str,
@@ -2206,3 +2277,4 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
