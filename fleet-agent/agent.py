@@ -2060,6 +2060,8 @@ async def run_agent():
     while True:
         try:
             async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
+                global _active_ws
+                _active_ws = ws
                 log.info("Connected to fleet server")
                 reconnect_delay = 5
                 hb_task = asyncio.create_task(heartbeat_loop(ws))
@@ -2105,21 +2107,39 @@ async def run_services():
 _start_time = time.time()
 
 
+# Global WS reference for graceful shutdown notification
+_active_ws = None
+
+
 def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     sync_publishers()
 
     def _sig(sig, _):
-        log.info("Signal %s, shutting down", sig)
-        for stream_name in list(_ffmpeg_procs):
-            stop_publisher(stream_name)
-        for session_id in list(_archive_sessions):
-            stop_archive_session(session_id)
+        log.info("Signal %s received, initiating graceful shutdown", sig)
         if _admin_server is not None:
             _admin_server.should_exit = True
-        for task in list(asyncio.all_tasks(loop)):
-            task.cancel()
+
+        async def _drain():
+            global _active_ws
+            if _active_ws is not None:
+                try:
+                    await asyncio.wait_for(
+                        ws_send(_active_ws, {"type": "draining", "reason": "SIGTERM"}),
+                        timeout=2.0
+                    )
+                except Exception:
+                    pass
+            for sn in list(_ffmpeg_procs):
+                stop_publisher(sn)
+            for sid in list(_archive_sessions):
+                stop_archive_session(sid)
+            await asyncio.sleep(0.5)
+            for task in list(asyncio.all_tasks(loop)):
+                task.cancel()
+
+        loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_drain(), loop=loop))
 
     signal.signal(signal.SIGTERM, _sig)
     signal.signal(signal.SIGINT, _sig)
@@ -2136,4 +2156,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
