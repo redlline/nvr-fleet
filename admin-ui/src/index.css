@@ -413,3 +413,38 @@ canvas { width: 100% !important; }
 }
 .tab.active { color: var(--accent2); border-bottom-color: var(--accent2); font-weight: 500; }
 .tab:hover:not(.active) { color: var(--text); }
+
+
+/* ── Branding ── */
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-logo-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.sidebar-copyright {
+  padding: 12px 20px;
+  font-size: 11px;
+  color: var(--text2);
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  opacity: 0.6;
+}
+
+/* ── Traffic source badge ── */
+.traffic-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  background: rgba(99,102,241,0.12);
+  color: var(--accent2);
+  border: 1px solid rgba(99,102,241,0.2);
+}
