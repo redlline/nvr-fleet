@@ -1743,9 +1743,9 @@ async def _mtx_metrics_poll_loop():
             _mtx_samples = [s for s in _mtx_samples if s["ts"] >= _cutoff]
             _mtx_last_poll = {p: {"rx": _rx.get(p, 0), "tx": _tx.get(p, 0)} for p in _all}
             _mtx_last_poll["__ts__"] = datetime.utcnow().timestamp()
-            logger.debug("MTX poll: %d paths, samples=%d", len(_all), len(_mtx_samples))
+            logger.info("MTX poll: %d paths, samples=%d", len(_all), len(_mtx_samples))
         except Exception as exc:
-            logger.debug("MTX metrics poll error: %s", exc)
+            logger.info("MTX metrics poll error: %s", exc)
         await asyncio.sleep(30)
 
 
@@ -2396,6 +2396,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
