@@ -126,8 +126,27 @@ TUNNEL_RTSP_END = int(os.environ.get("TUNNEL_RTSP_END", "25653"))
 _mtx_metrics_cache: dict = {}
 # active agent WebSocket connections: site_id -> WebSocket
 active_agents: dict[str, WebSocket] = {}
+
+# Archive RPC rate limiting: max 2 concurrent archive requests per site
+_archive_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+def _get_archive_semaphore(site_id: str, max_concurrent: int = 2) -> asyncio.Semaphore:
+    if site_id not in _archive_semaphores:
+        _archive_semaphores[site_id] = asyncio.Semaphore(max_concurrent)
+    return _archive_semaphores[site_id]
 agent_send_locks: dict[str, asyncio.Lock] = {}
 pending_agent_requests: dict[str, tuple[str, asyncio.Future]] = {}
+
+# Archive RPC rate limiting: max 2 concurrent archive requests per site
+# (Hikvision/Dahua NVRs typically have a 2–4 ISAPI session limit)
+_archive_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+def _get_archive_semaphore(site_id: str, max_concurrent: int = 2) -> asyncio.Semaphore:
+    if site_id not in _archive_semaphores:
+        _archive_semaphores[site_id] = asyncio.Semaphore(max_concurrent)
+    return _archive_semaphores[site_id]
 # traffic accumulators: site_id -> bytes this minute
 traffic_acc:   dict[str, int] = {}
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -1198,8 +1217,34 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
     logger.info(f"Agent connected: {site_id}")
     await _deploy_config(site_id, db)
 
+    PING_INTERVAL = 30   # seconds between server pings
+    PONG_TIMEOUT  = 10   # seconds to wait for pong
+
+    async def _ws_recv_with_ping():
+        """Receive next message, sending ping if idle for PING_INTERVAL seconds."""
+        while True:
+            try:
+                raw = await asyncio.wait_for(ws.receive_text(), timeout=PING_INTERVAL)
+                return raw
+            except asyncio.TimeoutError:
+                # Agent is idle — send ping and wait for pong
+                try:
+                    await ws.send_text(json.dumps({"type": "ping"}))
+                    pong_raw = await asyncio.wait_for(ws.receive_text(), timeout=PONG_TIMEOUT)
+                    pong = json.loads(pong_raw)
+                    if pong.get("type") == "pong":
+                        agent.last_seen = datetime.utcnow()
+                        db.commit()
+                        continue
+                    # Unexpected message after ping — process it normally
+                    return pong_raw
+                except (asyncio.TimeoutError, Exception):
+                    logger.warning("Agent %s did not respond to ping, closing", site_id)
+                    raise WebSocketDisconnect(code=4408)
+
     try:
-        async for raw in ws.iter_text():
+        while True:
+            raw = await _ws_recv_with_ping()
             msg = json.loads(raw)
             mtype = msg.get("type")
             reply_to = msg.get("reply_to")
@@ -1212,10 +1257,11 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
                         future.set_result(msg)
                 continue
 
-            if mtype == "heartbeat":
+            if mtype in {"heartbeat", "pong"}:
                 agent.last_seen = datetime.utcnow()
-                agent.version   = msg.get("version", "")
-                agent.uptime    = msg.get("uptime", 0)
+                if mtype == "heartbeat":
+                    agent.version   = msg.get("version", "")
+                    agent.uptime    = msg.get("uptime", 0)
                 db.commit()
 
             elif mtype == "traffic":
@@ -1862,7 +1908,8 @@ async def list_archive(
     start = start or (end - timedelta(hours=24))
     if start >= end:
         raise HTTPException(400, "Start time must be before end time")
-    reply = await call_agent(site_id, {
+    async with _get_archive_semaphore(site_id):
+        reply = await call_agent(site_id, {
         "action": "archive_list",
         "site": _site_payload(site),
         "cameras": [_camera_payload(camera) for camera in cameras],
@@ -1885,7 +1932,8 @@ async def start_archive_playback(
     camera = _get_site_camera(db, site_id, data.camera_id)
     if data.start >= data.end:
         raise HTTPException(400, "Start time must be before end time")
-    reply = await call_agent(site_id, {
+    async with _get_archive_semaphore(site_id):
+        reply = await call_agent(site_id, {
         "action": "archive_start_playback",
         "site": _site_payload(site),
         "camera": _camera_payload(camera),
@@ -2441,6 +2489,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
