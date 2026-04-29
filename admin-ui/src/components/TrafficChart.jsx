@@ -1,27 +1,37 @@
 import { useState, useEffect, useRef } from "react"
 import { api } from "../lib/api"
 
-export default function TrafficChart({ siteId, hours, title }) {
+export default function TrafficChart({ siteId, hours, source = "go2rtc", title }) {
   const [data, setData] = useState([])
   const canvasRef = useRef(null)
 
   async function load() {
     try {
-      const samples = siteId
-        ? await api.getTraffic(siteId, hours)
-        : await api.getTotalTraffic(hours)
+      let samples
+      if (source === "mediamtx") {
+        samples = siteId
+          ? await api.getTrafficMtx(siteId, hours)
+          : await api.getTotalTrafficMtx(hours)
+      } else {
+        samples = siteId
+          ? await api.getTraffic(siteId, hours)
+          : await api.getTotalTraffic(hours)
+      }
       setData(samples)
     } catch (e) { console.error(e) }
   }
 
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t) }, [siteId, hours])
+  useEffect(() => {
+    load()
+    const t = setInterval(load, 30000)
+    return () => clearInterval(t)
+  }, [siteId, hours, source])
 
   useEffect(() => {
     if (!canvasRef.current || data.length === 0) return
     draw(canvasRef.current, data)
   }, [data])
 
-  // aggregate by minute
   function aggregate(samples) {
     const map = {}
     for (const s of samples) {
@@ -34,12 +44,12 @@ export default function TrafficChart({ siteId, hours, title }) {
   }
 
   function draw(canvas, rawData) {
-    const agg  = aggregate(rawData)
+    const agg = aggregate(rawData)
     if (agg.length === 0) return
 
-    const dpr  = window.devicePixelRatio || 1
-    const W    = canvas.offsetWidth
-    const H    = 160
+    const dpr = window.devicePixelRatio || 1
+    const W   = canvas.offsetWidth
+    const H   = 160
     canvas.width  = W * dpr
     canvas.height = H * dpr
     canvas.style.height = H + "px"
@@ -50,11 +60,10 @@ export default function TrafficChart({ siteId, hours, title }) {
 
     const pad   = { top: 10, right: 20, bottom: 30, left: 60 }
     const inner = { w: W - pad.left - pad.right, h: H - pad.top - pad.bottom }
-
     const maxVal = Math.max(...agg.map(d => Math.max(d.rx, d.tx)), 1)
 
-    function xOf(i)  { return pad.left + (i / (agg.length - 1)) * inner.w }
-    function yOf(v)  { return pad.top + inner.h - (v / maxVal) * inner.h }
+    function xOf(i) { return pad.left + (i / (agg.length - 1)) * inner.w }
+    function yOf(v) { return pad.top + inner.h - (v / maxVal) * inner.h }
 
     // grid
     ctx.strokeStyle = "rgba(255,255,255,0.05)"
