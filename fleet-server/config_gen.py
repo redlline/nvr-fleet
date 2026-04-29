@@ -98,6 +98,15 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
 
     auth_users = [
         {
+            "user": "any",
+            "pass": "",
+            "ips": [],
+            "permissions": [
+                {"action": "read"},
+                {"action": "playback"},
+            ],
+        },
+        {
             "user": "viewer",
             "pass": "VIEWER_PASS",
             "ips": [],
@@ -144,6 +153,9 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
     cfg["hls"] = True
     cfg["hlsAddress"] = ":8888"
     cfg["hlsAlwaysRemux"] = True
+    cfg["hlsSegmentCount"] = 7
+    cfg["hlsSegmentDuration"] = "1s"
+    cfg["hlsPartDuration"] = "200ms"
 
     path_defaults = cfg.get("pathDefaults", {}) or {}
     for legacy_key in ("publishUser", "publishPass", "publishIPs", "readUser", "readPass", "readIPs"):
@@ -156,3 +168,4 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
     Path(mediamtx_yml_path).parent.mkdir(parents=True, exist_ok=True)
     with open(mediamtx_yml_path, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+
