@@ -119,6 +119,9 @@ TUNNEL_CONTROL_END = int(os.environ.get("TUNNEL_CONTROL_END", "28099"))
 TUNNEL_RTSP_START = int(os.environ.get("TUNNEL_RTSP_START", "25554"))
 TUNNEL_RTSP_END = int(os.environ.get("TUNNEL_RTSP_END", "25653"))
 
+
+# Cache for MediaMTX metrics delta calculation
+_mtx_metrics_cache: dict = {}
 # active agent WebSocket connections: site_id -> WebSocket
 active_agents: dict[str, WebSocket] = {}
 agent_send_locks: dict[str, asyncio.Lock] = {}
@@ -1646,42 +1649,59 @@ def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depe
 
 
 def _parse_mtx_metrics(metrics_text: str, site_id, hours: int):
-    """Parse MediaMTX Prometheus metrics into traffic samples."""
+    """Parse MediaMTX Prometheus metrics into traffic samples using delta calculation."""
     import re
-    from datetime import timezone
+    global _mtx_metrics_cache
     now = datetime.utcnow()
-    cutoff = now - timedelta(hours=hours)
 
     rx_bytes = {}
     tx_bytes = {}
 
     for line in metrics_text.splitlines():
-        if line.startswith("#"):
+        if line.startswith("#") or not line.strip():
             continue
-        m = re.match(r'mediamtx_path_reader_bytes_received\{.*?path="([^"]+)".*?\}\s+([\d.]+)', line)
+        # paths_bytes_received{name="sitea4bb595d/cam01",state="ready"} 12345
+        m = re.match(r'paths_bytes_received\{name="([^"]+)"[^}]*\}\s+([\d.]+)', line)
         if m:
-            path, val = m.group(1), float(m.group(2))
+            path, val = m.group(1), int(float(m.group(2)))
             if site_id is None or path.startswith(f"site{site_id}/"):
-                rx_bytes[path] = rx_bytes.get(path, 0) + int(val)
-        m = re.match(r'mediamtx_path_reader_bytes_sent\{.*?path="([^"]+)".*?\}\s+([\d.]+)', line)
+                rx_bytes[path] = rx_bytes.get(path, 0) + val
+        m = re.match(r'paths_bytes_sent\{name="([^"]+)"[^}]*\}\s+([\d.]+)', line)
         if m:
-            path, val = m.group(1), float(m.group(2))
+            path, val = m.group(1), int(float(m.group(2)))
             if site_id is None or path.startswith(f"site{site_id}/"):
-                tx_bytes[path] = tx_bytes.get(path, 0) + int(val)
+                tx_bytes[path] = tx_bytes.get(path, 0) + val
 
     if not rx_bytes and not tx_bytes:
         return []
 
-    all_paths = set(list(rx_bytes.keys()) + list(tx_bytes.keys()))
+    # Calculate deltas from cache
+    cache_key = f"mtx_{site_id}"
+    prev = _mtx_metrics_cache.get(cache_key, {})
     samples = []
+
+    all_paths = set(list(rx_bytes.keys()) + list(tx_bytes.keys()))
     for path in all_paths:
+        cur_rx = rx_bytes.get(path, 0)
+        cur_tx = tx_bytes.get(path, 0)
+        prev_rx = prev.get(path, {}).get("rx", cur_rx)
+        prev_tx = prev.get(path, {}).get("tx", cur_tx)
+        delta_rx = max(cur_rx - prev_rx, 0)
+        delta_tx = max(cur_tx - prev_tx, 0)
         samples.append({
             "ts": now.isoformat() + "Z",
-            "rx_bytes": rx_bytes.get(path, 0),
-            "tx_bytes": tx_bytes.get(path, 0),
+            "rx_bytes": delta_rx,
+            "tx_bytes": delta_tx,
             "stream_path": path,
             "site_id": site_id or "",
         })
+
+    # Update cache
+    _mtx_metrics_cache[cache_key] = {
+        path: {"rx": rx_bytes.get(path, 0), "tx": tx_bytes.get(path, 0)}
+        for path in all_paths
+    }
+
     return samples
 
 
@@ -2282,6 +2302,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
