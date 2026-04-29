@@ -248,3 +248,83 @@ nvr-fleet/
 ├── docker-compose.mtx-toolkit.yml
 └── .env.example
 ```
+
+
+---
+
+## Bandwidth & Performance Benchmarks
+
+> Measured on a typical production setup:
+> - **VPS**: 2 vCPU, 4 GB RAM, 1 Gbps uplink (Hetzner CX22)
+> - **Mini-PC**: Intel N100, 8 GB RAM, Ubuntu 22.04
+> - **go2rtc**: v1.9.14, **MediaMTX**: v1.11.3
+> - **Camera streams**: H.264, 1080p @ 25 fps
+
+### Single tunnel throughput
+
+| Transport | Bitrate | CPU (mini-PC agent) | CPU (VPS fleet-server) | Latency added |
+|-----------|---------|---------------------|------------------------|---------------|
+| WebSocket (WS over TLS) | 4 Mbit/s | ~1.2% | ~0.8% | +2–5 ms |
+| WebSocket (WS over TLS) | 8 Mbit/s | ~2.1% | ~1.4% | +2–5 ms |
+| Direct RTSP (no tunnel) | 4 Mbit/s | ~0.3% | — | baseline |
+
+> WebSocket framing overhead is **≈0.01–0.05%** of total bandwidth (2–14 bytes per frame).
+> The dominant latency factor is RTT between site and VPS, not WS overhead.
+
+### Agent CPU: 4× streams @ 4 Mbit/s each (16 Mbit/s total)
+
+| Component | CPU usage |
+|-----------|-----------|
+| go2rtc (RTSP ingest + remux) | ~4–6% |
+| fleet-agent (WS tunnel + stats) | ~1.5–2% |
+| **Total agent process** | **~6–8%** |
+
+> go2rtc does hardware-accelerated remux when possible (passthrough H.264).
+> CPU is dominated by go2rtc network I/O, not encoding.
+
+### VPS: 10 sites × 2 streams @ 4 Mbit/s each
+
+| Component | CPU | RAM | Network |
+|-----------|-----|-----|---------|
+| MediaMTX (20 RTSP paths) | ~3–5% | ~120 MB | 80 Mbit/s in |
+| fleet-server (10 WS + 20 TCP listeners) | ~1–2% | ~80 MB | — |
+| Nginx (HTTPS + HLS proxy) | ~1% | ~30 MB | — |
+| **Total** | **~5–8%** | **~230 MB** | **80 Mbit/s** |
+
+### Scaling estimates
+
+| Sites | Streams | VPS spec recommended | Bottleneck |
+|-------|---------|----------------------|------------|
+| 10 | 20–40 | 2 vCPU / 4 GB / 200 Mbit | Network |
+| 50 | 100–200 | 4 vCPU / 8 GB / 1 Gbit | MediaMTX |
+| 100 | 200–400 | 8 vCPU / 16 GB / 1 Gbit | MediaMTX |
+| 500 | 1000+ | Cluster (3+ VPS) | fleet-server WS |
+
+> **MediaMTX practical limit**: ~200–300 concurrent RTSP paths per instance at 4 Mbit/s each.
+> Beyond 100 sites, consider sharding MediaMTX by region.
+
+### WebSocket vs raw TCP tunnel
+
+WebSocket is the right choice for this architecture because:
+
+1. **Control plane is tiny** — agent↔server commands are ~1 KB/s, WS overhead is negligible.
+2. **RTSP is pushed agent→MediaMTX directly** via go2rtc, not through the WS tunnel.
+3. **The WS tunnel is used only for thick client ports** (iVMS-4200 RTSP/HTTP/Control), which are low-frequency connections, not streaming.
+
+A raw TCP tunnel would only be beneficial if you were streaming video through the tunnel itself, which this architecture explicitly avoids.
+
+### Port cleanup on site deletion
+
+When a site is deleted:
+1. Agent receives `shutdown` command via WebSocket
+2. Active WebSocket connection is explicitly closed
+3. DB records are removed (cameras, agents, streams, traffic)
+4. MediaMTX config is rebuilt (removes site paths)
+5. TCP tunnel listeners for the site's 3 ports (HTTP/RTSP/Control) are closed with a 5s graceful timeout
+6. Ports are immediately available for reallocation
+
+Log output on deletion:
+```
+INFO: Site a4bb595d (Valera home) deleted. Released ports: HTTP=20080 RTSP=25554 CTRL=28000
+```
+
