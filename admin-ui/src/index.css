@@ -68,6 +68,27 @@ body {
   border-radius: 0;
 }
 
+.sidebar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  /* остальные стили */
+}
+
+.sidebar-link.active .sidebar-icon {
+  color: #2563eb;
+}
+
 .sidebar-link:hover { background: var(--bg3); color: var(--text); }
 .sidebar-link.active { background: rgba(99,102,241,0.15); color: var(--accent2); font-weight: 500; }
 .sidebar-link.logout { margin-top: auto; color: var(--red); }
