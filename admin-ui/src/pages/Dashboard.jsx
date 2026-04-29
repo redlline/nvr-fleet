@@ -2,9 +2,10 @@ import { useState, useEffect } from "react"
 import { api } from "../lib/api"
 
 export default function Dashboard({ navigate }) {
-  const [stats, setStats] = useState(null)
-  const [sites, setSites] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [stats, setStats]       = useState(null)
+  const [sites, setSites]       = useState([])
+  const [realtime, setRealtime] = useState({ rx_bps: 0, tx_bps: 0 })
+  const [loading, setLoading]   = useState(true)
 
   async function load() {
     try {
@@ -18,10 +19,21 @@ export default function Dashboard({ navigate }) {
     }
   }
 
+  async function loadRealtime() {
+    try {
+      const rt = await api.getRealtimeTraffic()
+      setRealtime(rt)
+    } catch (e) {
+      // silently ignore - mediamtx may not be available
+    }
+  }
+
   useEffect(() => {
     load()
-    const t = setInterval(load, 15000)
-    return () => clearInterval(t)
+    loadRealtime()
+    const t1 = setInterval(load, 15000)
+    const t2 = setInterval(loadRealtime, 5000) // real-time every 5s
+    return () => { clearInterval(t1); clearInterval(t2) }
   }, [])
 
   if (loading) return <div className="empty-state"><div className="spinner" /></div>
@@ -35,7 +47,7 @@ export default function Dashboard({ navigate }) {
           <div className="page-title">Dashboard</div>
           <div className="page-sub">System overview — auto-refresh every 15s</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={load}>↻ Refresh</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => { load(); loadRealtime() }}>↻ Refresh</button>
       </div>
 
       <div className="stat-grid">
@@ -60,11 +72,11 @@ export default function Dashboard({ navigate }) {
           <div className="stat-label">Live streams</div>
         </div>
         <div className="stat-card amber">
-          <div className="stat-value">{fmtBps(stats?.total_rx_bps)}</div>
+          <div className="stat-value">{fmtBps(realtime.rx_bps)}</div>
           <div className="stat-label">Incoming (↓)</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{fmtBps(stats?.total_tx_bps)}</div>
+          <div className="stat-value">{fmtBps(realtime.tx_bps)}</div>
           <div className="stat-label">Outgoing (↑)</div>
         </div>
       </div>
