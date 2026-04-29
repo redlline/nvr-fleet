@@ -909,10 +909,20 @@ class SiteTunnelManager:
 
     async def _close_listener(self, key: tuple[str, str]) -> None:
         server = self.listeners.pop(key, None)
-        self.listener_specs.pop(key, None)
+        spec = self.listener_specs.pop(key, None)
         if server:
             server.close()
-            await server.wait_closed()
+            try:
+                await asyncio.wait_for(server.wait_closed(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Tunnel listener for %s port %s did not close cleanly, forcing",
+                    key[0], spec["public_port"] if spec else "?"
+                )
+            logger.info(
+                "Tunnel listener closed for site %s %s",
+                key[0], key[1]
+            )
 
     async def _handle_client(self, spec: dict, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         site_id = spec["site_id"]
@@ -1377,16 +1387,49 @@ async def delete_site(site_id: str, db: Session = Depends(get_db), _=Depends(req
     site = db.query(Site).filter_by(id=site_id).first()
     if not site:
         raise HTTPException(404)
-    await send_to_agent(site_id, {"action": "shutdown"})
+    site_name = site.name
+    site_http_port = site.tunnel_http_port
+    site_rtsp_port = site.tunnel_rtsp_port
+    site_control_port = site.tunnel_control_port
+
+    # 1. Notify agent to shutdown gracefully
+    try:
+        await asyncio.wait_for(send_to_agent(site_id, {"action": "shutdown"}), timeout=3.0)
+    except Exception:
+        pass  # agent may be offline
+
+    # 2. Disconnect active WebSocket
+    ws = _agent_connections.get(site_id)
+    if ws:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+        _agent_connections.pop(site_id, None)
+
+    # 3. Remove from DB
     db.query(Camera).filter_by(site_id=site_id).delete()
     db.query(Agent).filter_by(site_id=site_id).delete()
     db.query(StreamStat).filter_by(site_id=site_id).delete()
     db.query(TrafficSample).filter_by(site_id=site_id).delete()
     db.delete(site)
     db.commit()
+
+    # 4. Rebuild mediamtx config (removes site paths)
     _rebuild_mediamtx(db)
+
+    # 5. Close tunnel listeners for this site (frees ports)
     await _sync_tunnel_listeners(db)
-    return {"status": "deleted"}
+
+    logger.info(
+        "Site %s (%s) deleted. Released ports: HTTP=%s RTSP=%s CTRL=%s",
+        site_id, site_name, site_http_port, site_rtsp_port, site_control_port
+    )
+    return {"status": "deleted", "released_ports": {
+        "http": site_http_port,
+        "rtsp": site_rtsp_port,
+        "control": site_control_port,
+    }}
 
 
 # ─── Cameras ─────────────────────────────────────────────────────────────────
@@ -2398,6 +2441,7 @@ def _sync_mtx_toolkit_node_streams() -> None:
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
 
 
 
