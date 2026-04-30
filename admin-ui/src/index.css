@@ -487,3 +487,41 @@ canvas { width: 100% !important; }
   color: var(--accent2);
   border: 1px solid rgba(99,102,241,0.2);
 }
+
+
+/* ── Language switcher ── */
+.sidebar-lang {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px;
+  margin-top: auto;
+}
+
+.lang-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.lang-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.lang-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ── Sidebar logo image ── */
+.sidebar-logo-img {
+  height: 22px;
+  width: auto;
+  object-fit: contain;
+}
