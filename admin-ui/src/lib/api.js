@@ -100,5 +100,15 @@ export const api = {
   getTrafficMtx: (siteId, hours = 1) => req("GET", `/api/sites/${siteId}/traffic/mtx?hours=${hours}`),
   getTotalTrafficMtx: (hours = 24) => req("GET", `/api/traffic/total/mtx?hours=${hours}`),
   getRealtimeTraffic: () => req("GET", "/api/traffic/realtime"),
-}
 
+  // Users
+  listUsers:    ()            => req("GET",    "/api/users"),
+  createUser:   (data)        => req("POST",   "/api/users", data),
+  updateUser:   (id, data)    => req("PUT",    `/api/users/${id}`, data),
+  deleteUser:   (id)          => req("DELETE", `/api/users/${id}`),
+  getMe:        ()            => req("GET",    "/api/auth/me"),
+
+  // Login with username+password
+  loginWithCredentials: (username, password) =>
+    req("POST", "/api/auth/login", { username, password }),
+}
