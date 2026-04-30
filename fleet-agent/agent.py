@@ -1946,6 +1946,11 @@ async def send_reply(ws, request_id: str, *, ok: bool, **payload) -> None:
 
 
 async def handle_message(ws: websockets.WebSocketClientProtocol, msg: dict):
+    msg_type = msg.get("type")
+    if msg_type == "ping":
+        await ws_send(ws, {"type": "pong"})
+        return
+
     action = msg.get("action")
     request_id = msg.get("request_id")
     try:
@@ -2183,5 +2188,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
