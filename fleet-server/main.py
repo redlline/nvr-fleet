@@ -101,6 +101,84 @@ app.add_middleware(
 security = HTTPBearer(auto_error=False)
 
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin-secret-change-me")
+JWT_SECRET  = os.environ.get("JWT_SECRET", ADMIN_TOKEN)
+JWT_ALGO    = "HS256"
+JWT_EXPIRE_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "24"))
+
+
+def _hash_password(password: str) -> str:
+    import hashlib, os as _os
+    salt = _os.urandom(16).hex()
+    h = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+    return f"{salt}:{h}"
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    import hashlib
+    try:
+        salt, h = password_hash.split(":", 1)
+        return hashlib.sha256(f"{salt}{password}".encode()).hexdigest() == h
+    except Exception:
+        return False
+
+
+def _create_jwt(user_id: int, username: str, role: str) -> str:
+    import jwt as _jwt
+    from datetime import timezone
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS),
+    }
+    return _jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+def _decode_jwt(token: str) -> dict:
+    import jwt as _jwt
+    return _jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+
+
+def _get_current_user(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db),
+) -> "User":
+    # Legacy: ADMIN_TOKEN still works as super-admin
+    if creds and creds.credentials == ADMIN_TOKEN:
+        # Return a virtual admin user
+        u = User()
+        u.id = 0
+        u.username = "admin"
+        u.role = "admin"
+        u.allowed_sites = "[]"
+        return u
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = _decode_jwt(creds.credentials)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = db.query(User).filter_by(id=int(payload["sub"]), is_active=True).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def require_admin(user: "User" = Depends(_get_current_user)) -> "User":
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+def require_operator(user: "User" = Depends(_get_current_user)) -> "User":
+    if user.role not in ("admin", "operator"):
+        raise HTTPException(status_code=403, detail="Operator access required")
+    return user
+
+
+def require_viewer(user: "User" = Depends(_get_current_user)) -> "User":
+    # Any authenticated user can view
+    return user
 MEDIAMTX_YAML = os.environ.get("MEDIAMTX_YAML", "/app/mediamtx.yml")
 MEDIAMTX_API  = os.environ.get("MEDIAMTX_API",  "http://localhost:9997")
 PUBLIC_HOST   = os.environ.get("PUBLIC_HOST",    "localhost")
@@ -1180,6 +1258,21 @@ async def startup_event() -> None:
     asyncio.create_task(_mtx_metrics_poll_loop())
     db = SessionLocal()
     try:
+        # Create default admin user if no users exist
+        if db.query(User).count() == 0:
+            default_password = ADMIN_TOKEN
+            admin = User(
+                username="admin",
+                password_hash=_hash_password(default_password),
+                role="admin",
+                allowed_sites="[]",
+            )
+            db.add(admin)
+            db.commit()
+            logger.info("Created default admin user (password = ADMIN_TOKEN)")
+    except Exception as exc:
+        logger.warning("Could not create default admin: %s", exc)
+        db.rollback()
         mediamtx_changed = _rebuild_mediamtx(db)
         await _sync_tunnel_listeners(db)
         if mediamtx_changed:
@@ -2500,5 +2593,104 @@ async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
 
 
 
+
+
+class User(Base):
+    """Panel user with role-based access."""
+    __tablename__ = "users"
+    id            = Column(Integer, primary_key=True, index=True)
+    username      = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    role          = Column(String, nullable=False, default="viewer")
+    # Roles: admin | operator | viewer
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    is_active     = Column(Boolean, default=True)
+    allowed_sites = Column(String, default="[]")  # JSON list of site_ids, empty = all
+
+
+
+
+# ── User management ────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/login")
+def login(data: dict, db: Session = Depends(get_db)):
+    username = (data.get("username") or "").strip()
+    password = data.get("password", "")
+    # Legacy: password-only login with ADMIN_TOKEN
+    if not username and password == ADMIN_TOKEN:
+        return {"token": ADMIN_TOKEN, "role": "admin", "username": "admin"}
+    user = db.query(User).filter_by(username=username, is_active=True).first()
+    if not user or not _verify_password(password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = _create_jwt(user.id, user.username, user.role)
+    return {"token": token, "role": user.role, "username": user.username}
+
+
+@app.get("/api/auth/me")
+def get_me(user=Depends(_get_current_user)):
+    return {"id": user.id, "username": user.username, "role": user.role}
+
+
+@app.get("/api/users")
+def list_users(db: Session = Depends(get_db), _=Depends(require_admin)):
+    users = db.query(User).all()
+    return [{"id": u.id, "username": u.username, "role": u.role,
+             "is_active": u.is_active, "allowed_sites": u.allowed_sites,
+             "created_at": u.created_at.isoformat() if u.created_at else None}
+            for u in users]
+
+
+@app.post("/api/users")
+def create_user(data: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+    import json as _json
+    username = (data.get("username") or "").strip()
+    password = data.get("password", "")
+    role     = data.get("role", "viewer")
+    if not username or not password:
+        raise HTTPException(400, "username and password are required")
+    if role not in ("admin", "operator", "viewer"):
+        raise HTTPException(400, "role must be admin, operator, or viewer")
+    if db.query(User).filter_by(username=username).first():
+        raise HTTPException(409, "Username already exists")
+    u = User(
+        username=username,
+        password_hash=_hash_password(password),
+        role=role,
+        allowed_sites=_json.dumps(data.get("allowed_sites", [])),
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return {"id": u.id, "username": u.username, "role": u.role}
+
+
+@app.put("/api/users/{user_id}")
+def update_user(user_id: int, data: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+    import json as _json
+    u = db.query(User).filter_by(id=user_id).first()
+    if not u:
+        raise HTTPException(404, "User not found")
+    if "role" in data and data["role"] in ("admin", "operator", "viewer"):
+        u.role = data["role"]
+    if "password" in data and data["password"]:
+        u.password_hash = _hash_password(data["password"])
+    if "is_active" in data:
+        u.is_active = bool(data["is_active"])
+    if "allowed_sites" in data:
+        u.allowed_sites = _json.dumps(data["allowed_sites"]) if isinstance(data["allowed_sites"], list)             else data["allowed_sites"]
+    db.commit()
+    return {"id": u.id, "username": u.username, "role": u.role, "is_active": u.is_active}
+
+
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(require_admin)):
+    u = db.query(User).filter_by(id=user_id).first()
+    if not u:
+        raise HTTPException(404, "User not found")
+    if u.id == current.id:
+        raise HTTPException(400, "Cannot delete yourself")
+    db.delete(u)
+    db.commit()
+    return {"status": "deleted"}
 
 
