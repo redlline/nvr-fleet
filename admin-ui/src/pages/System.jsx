@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api } from "../lib/api"
+import { t } from "../lib/i18n"
 
 export default function System() {
   const [tls, setTls] = useState(null)
@@ -216,10 +217,10 @@ export default function System() {
     <div>
       <div className="page-header">
         <div>
-          <div className="page-title">System</div>
-          <div className="page-sub">TLS, stack control, logs and backups without SSH</div>
+          <div className="page-title">{t("system")}</div>
+          <div className="page-sub">{t("systemSub")}</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={load}>Refresh</button>
+        <button className="btn btn-ghost btn-sm" onClick={load}>{t("refresh")}</button>
       </div>
 
       {message && <div className="alert alert-success">{message}</div>}
@@ -319,11 +320,11 @@ export default function System() {
           <table>
             <thead>
               <tr>
-                <th>Service</th>
-                <th>Container</th>
-                <th>Status</th>
-                <th>Health</th>
-                <th>Probe</th>
+                <th>{t("service")}</th>
+                <th>{t("container")}</th>
+                <th>{t("status")}</th>
+                <th>{t("health")}</th>
+                <th>{t("probe")}</th>
                 <th></th>
               </tr>
             </thead>
@@ -350,7 +351,7 @@ export default function System() {
       <Section title="Logs">
         <div className="form-row" style={{ alignItems: "end" }}>
           <div className="form-group">
-            <label className="form-label">Service</label>
+            <label className="form-label">{t("service")}</label>
             <select className="form-input" value={logsService} onChange={(e) => setLogsService(e.target.value)}>
               {(stack?.services || []).map((service) => (
                 <option key={service.key} value={service.key}>{service.label}</option>
@@ -358,7 +359,7 @@ export default function System() {
             </select>
           </div>
           <div className="form-group" style={{ maxWidth: 180 }}>
-            <label className="form-label">Tail lines</label>
+            <label className="form-label">{t("tailLines")}</label>
             <input className="form-input" type="number" min="20" max="2000" value={logsTail} onChange={(e) => setLogsTail(e.target.value)} />
           </div>
           <div className="form-group" style={{ display: "flex", gap: 8 }}>
@@ -382,7 +383,7 @@ export default function System() {
             fontSize: 12,
           }}
         >
-          {logsText || "No logs loaded yet."}
+          {logsText || "{t("noLogsYet")}"}
         </pre>
       </Section>
 
@@ -487,4 +488,5 @@ function formatBytes(bytes) {
   }
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }
+
 
