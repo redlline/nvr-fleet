@@ -361,7 +361,7 @@ STACK_SERVICE_SPECS = [
         "label": "MTX Toolkit UI",
         "container_name": "mtx-toolkit-frontend",
         "probe_kind": "http",
-        "probe_target": "http://host.docker.internal:3001/",
+        "probe_target": f"http://{os.environ.get('MTX_UI_USER','admin')}:{os.environ.get('MTX_UI_PASSWORD','changeme')}@host.docker.internal:3001/",
     },
     {
         "key": "mtx-toolkit-api",
@@ -482,6 +482,9 @@ def _http_probe(url: str, timeout: int = 3) -> tuple[Optional[bool], str]:
     except urllib.error.HTTPError as exc:
         if 300 <= exc.code < 400:
             return True, f"HTTP {exc.code}"
+        if exc.code == 401 or exc.code == 403:
+            # Service is running but protected — treat as reachable
+            return True, f"HTTP {exc.code} (protected)"
         return False, str(exc)
     except Exception as exc:
         return False, str(exc)
@@ -2692,5 +2695,6 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
