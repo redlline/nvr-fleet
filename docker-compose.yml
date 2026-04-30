@@ -37,6 +37,8 @@ services:
       dockerfile: fleet-server/Dockerfile
     container_name: fleet-server
     restart: unless-stopped
+    depends_on:
+      - mediamtx
     ports:
       - "20080-20179:20080-20179"
       - "25554-25653:25554-25653"
@@ -49,6 +51,7 @@ services:
       MEDIAMTX_API_USER: "mediamtx-internal"
       MEDIAMTX_API_PASS: "MEDIAMTX_INTERNAL_PASS"
       MEDIAMTX_API: "http://mediamtx-internal:MEDIAMTX_INTERNAL_PASS@host.docker.internal:9997"
+      MEDIAMTX_HLS_PROXY_TARGET: "http://host.docker.internal:8888"
       MEDIAMTX_YAML: "/app/mediamtx/mediamtx.yml"
       TUNNEL_HTTP_START: "20080"
       TUNNEL_HTTP_END: "20179"
