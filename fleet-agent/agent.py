@@ -51,6 +51,8 @@ FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "/usr/bin/ffmpeg")
 SERVER_RTSP_PORT = os.environ.get("SERVER_RTSP_PORT", "8554")
 AGENT_ADMIN_HOST = os.environ.get("AGENT_ADMIN_HOST", "0.0.0.0")
 AGENT_ADMIN_PORT = int(os.environ.get("AGENT_ADMIN_PORT", "7070"))
+AGENT_STATE_DIR = os.environ.get("AGENT_STATE_DIR", "/var/lib/nvr-fleet-agent")
+BUNDLE_CACHE_PATH = os.environ.get("BUNDLE_CACHE_PATH", f"{AGENT_STATE_DIR}/bundle-cache.json")
 
 VERSION = "1.3.0"
 
@@ -77,6 +79,85 @@ async def ws_send(ws, payload: dict) -> None:
 
 class AdapterError(RuntimeError):
     pass
+
+
+def _bundle_cache_file() -> Path:
+    path = Path(BUNDLE_CACHE_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _bundle_from_site_and_cameras(site: dict | None, cameras: list[dict] | None, existing: dict | None = None) -> dict:
+    site_payload = dict((existing or {}).get("site") or {})
+    if site:
+        site_payload.update(site)
+
+    site_payload.setdefault("id", SITE_ID)
+    site_payload.setdefault("name", SITE_ID)
+    site_payload.setdefault("city", "")
+    site_payload.setdefault("vendor", "hikvision")
+    site_payload.setdefault("channel_count", 0)
+    site_payload.setdefault("is_configured", False)
+    site_payload.setdefault("nvr_ip", "")
+    site_payload.setdefault("nvr_http_port", 80)
+    site_payload.setdefault("nvr_control_port", 8000)
+    site_payload.setdefault("nvr_user", "admin")
+    site_payload.setdefault("nvr_pass", "")
+    site_payload.setdefault("nvr_port", 554)
+    site_payload.setdefault("public_host", SERVER_HOST)
+    site_payload.setdefault("tunnel_http_port", None)
+    site_payload.setdefault("tunnel_control_port", None)
+    site_payload.setdefault("tunnel_rtsp_port", None)
+    site_payload.setdefault("stream_type", "main")
+
+    camera_payload = list(cameras if cameras is not None else (existing or {}).get("cameras") or [])
+    thick_client = {
+        "host": site_payload.get("public_host") or SERVER_HOST,
+        "http_port": site_payload.get("tunnel_http_port"),
+        "control_port": site_payload.get("tunnel_control_port"),
+        "rtsp_port": site_payload.get("tunnel_rtsp_port"),
+    }
+    return {
+        "site": site_payload,
+        "cameras": camera_payload,
+        "thick_client": thick_client,
+    }
+
+
+def _read_cached_bundle() -> dict | None:
+    path = _bundle_cache_file()
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except Exception as exc:
+        log.warning("Cannot read cached bundle: %s", exc)
+    return None
+
+
+def _write_cached_bundle(bundle: dict) -> None:
+    path = _bundle_cache_file()
+    path.write_text(json.dumps(bundle, ensure_ascii=True, indent=2), encoding="utf-8")
+
+
+def _cache_bundle_payload(payload: dict | None, *, site: dict | None = None, cameras: list[dict] | None = None) -> dict | None:
+    if not isinstance(payload, dict):
+        return payload
+    existing = _read_cached_bundle()
+    merged = _bundle_from_site_and_cameras(
+        payload.get("site") if site is None else site,
+        payload.get("cameras") if cameras is None else cameras,
+        existing=existing | payload if existing else payload,
+    )
+    if isinstance(payload.get("thick_client"), dict):
+        merged["thick_client"] = payload["thick_client"]
+    if "warning" in payload:
+        merged["warning"] = payload["warning"]
+    _write_cached_bundle(merged)
+    return merged
 
 
 class LocalCameraItem(BaseModel):
@@ -434,19 +515,37 @@ LOCAL_ADMIN_HTML = """
       renderRows()
     }
 
+    async function apiJson(url, options) {
+      const response = await fetch(url, options)
+      const raw = await response.text()
+      let data = {}
+      if (raw) {
+        try {
+          data = JSON.parse(raw)
+        } catch (error) {
+          if (!response.ok) {
+            throw new Error(raw.trim() || `Request failed (${response.status})`)
+          }
+          throw new Error(`Invalid JSON response from ${url}`)
+        }
+      }
+      if (!response.ok) {
+        throw new Error(data.detail || data.error || raw.trim() || `Request failed (${response.status})`)
+      }
+      return data
+    }
+
     async function loadBundle() {
       setStatus("Loading...")
       try {
-        const response = await fetch("/api/bundle")
-        bundle = await response.json()
-        if (!response.ok) throw new Error(bundle.detail || "Failed to load")
+        bundle = await apiJson("/api/bundle")
         rows = bundle.cameras.map((camera) => ({ ...camera }))
         populateSiteForm()
         renderHeader()
         renderSiteConfig()
         renderRows()
         renderDevices()
-        setStatus(`Loaded ${rows.length} cameras`)
+        setStatus(bundle.warning || `Loaded ${rows.length} cameras`)
       } catch (error) {
         console.error(error)
         setStatus(error.message, true)
@@ -472,14 +571,13 @@ LOCAL_ADMIN_HTML = """
         if ((siteForm.nvr_pass || "").trim()) {
           payload.nvr_pass = siteForm.nvr_pass
         }
-        const response = await fetch("/api/site", {
+        const data = await apiJson("/api/site", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         })
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.detail || "Save failed")
         bundle.site = { ...bundle.site, ...data.site }
+        if (data.thick_client) bundle.thick_client = data.thick_client
         populateSiteForm()
         renderHeader()
         renderSiteConfig()
@@ -502,9 +600,7 @@ LOCAL_ADMIN_HTML = """
       setStatus("Saving NVR settings and discovering channels on NVR...")
       try {
         await saveSiteConfig(false)
-        const response = await fetch("/api/discover")
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.detail || "Discovery failed")
+        const data = await apiJson("/api/discover")
         const byChannel = new Map(rows.map((row) => [Number(row.channel), row]))
         for (const item of data.items) {
           const existing = byChannel.get(Number(item.channel))
@@ -535,9 +631,7 @@ LOCAL_ADMIN_HTML = """
     async function discoverDevices() {
       setStatus("Scanning LAN for ONVIF devices...")
       try {
-        const response = await fetch("/api/discover-devices")
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.detail || "Device discovery failed")
+        const data = await apiJson("/api/discover-devices")
         deviceRows = data.items || []
         renderDevices()
         setStatus(`Found ${deviceRows.length} ONVIF devices in LAN`)
@@ -562,14 +656,17 @@ LOCAL_ADMIN_HTML = """
           stream_type: row.stream_type,
           enabled: !!row.enabled,
         }))
-        const response = await fetch("/api/cameras", {
+        const data = await apiJson("/api/cameras", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         })
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.detail || "Save failed")
         rows = data.cameras.map((camera) => ({ ...camera }))
+        if (data.site) {
+          bundle.site = { ...bundle.site, ...data.site }
+        }
+        if (data.thick_client) bundle.thick_client = data.thick_client
+        renderHeader()
         renderRows()
         setStatus("NVR settings and camera configuration saved to server")
       } catch (error) {
@@ -1806,23 +1903,34 @@ def server_api_request(path: str, *, method: str = "GET", data=None):
 
 
 def fetch_bundle():
-    return server_api_request(f"/api/agent/sites/{SITE_ID}/bundle")
+    try:
+        payload = server_api_request(f"/api/agent/sites/{SITE_ID}/bundle")
+        return _cache_bundle_payload(payload)
+    except AdapterError as exc:
+        cached = _read_cached_bundle()
+        if cached:
+            fallback = dict(cached)
+            fallback["warning"] = f"Server is temporarily unavailable, showing last saved local config: {exc}"
+            return fallback
+        raise
 
 
 def save_bundle_site(site_data: dict):
-    return server_api_request(
+    payload = server_api_request(
         f"/api/agent/sites/{SITE_ID}/site",
         method="PUT",
         data=site_data,
     )
+    return _cache_bundle_payload(payload, site=payload.get("site") if isinstance(payload, dict) else None)
 
 
 def save_bundle_cameras(cameras: list[dict]):
-    return server_api_request(
+    payload = server_api_request(
         f"/api/agent/sites/{SITE_ID}/cameras/replace",
         method="PUT",
         data=cameras,
     )
+    return _cache_bundle_payload(payload, cameras=payload.get("cameras") if isinstance(payload, dict) else cameras)
 
 
 def guess_vendor_from_text(*values: str) -> str:
@@ -1907,7 +2015,10 @@ async def local_health():
 
 @local_app.get("/api/bundle")
 async def local_bundle():
-    return await asyncio.to_thread(fetch_bundle)
+    try:
+        return await asyncio.to_thread(fetch_bundle)
+    except AdapterError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @local_app.put("/api/site")
@@ -1915,30 +2026,44 @@ async def local_save_site(payload: LocalSiteConfigItem):
     data = payload.model_dump()
     if not (data.get("nvr_pass") or "").strip():
         data.pop("nvr_pass", None)
-    return await asyncio.to_thread(save_bundle_site, data)
+    try:
+        return await asyncio.to_thread(save_bundle_site, data)
+    except AdapterError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @local_app.get("/api/discover")
 async def local_discover():
-    bundle = await asyncio.to_thread(fetch_bundle)
+    try:
+        bundle = await asyncio.to_thread(fetch_bundle)
+    except AdapterError as exc:
+        raise HTTPException(502, str(exc)) from exc
     if not (bundle.get("site", {}).get("nvr_ip") or "").strip():
         raise HTTPException(400, "NVR IP is not configured yet")
-    items = await asyncio.to_thread(discover_archive_channels, bundle["site"], bundle["cameras"])
+    try:
+        items = await asyncio.to_thread(discover_archive_channels, bundle["site"], bundle["cameras"])
+    except AdapterError as exc:
+        raise HTTPException(502, str(exc)) from exc
     protocol = items[0].get("protocol") if items else None
     return {"items": items, "protocol": protocol}
 
 
 @local_app.get("/api/discover-devices")
 async def local_discover_devices():
-    items = await asyncio.to_thread(discover_onvif_devices)
+    try:
+        items = await asyncio.to_thread(discover_onvif_devices)
+    except AdapterError as exc:
+        raise HTTPException(502, str(exc)) from exc
     return {"items": items, "protocol": "onvif-ws-discovery"}
 
 
 @local_app.put("/api/cameras")
 async def local_save_cameras(items: list[LocalCameraItem]):
     payload = [item.model_dump() for item in items]
-    result = await asyncio.to_thread(save_bundle_cameras, payload)
-    return result
+    try:
+        return await asyncio.to_thread(save_bundle_cameras, payload)
+    except AdapterError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 async def send_reply(ws, request_id: str, *, ok: bool, **payload) -> None:
@@ -1957,6 +2082,10 @@ async def handle_message(ws: websockets.WebSocketClientProtocol, msg: dict):
         if action == "update_config":
             yaml_content = msg.get("go2rtc_yaml", "")
             if msg.get("site") and msg.get("cameras") is not None:
+                await asyncio.to_thread(
+                    _cache_bundle_payload,
+                    {"site": msg["site"], "cameras": msg["cameras"]},
+                )
                 yaml_content = await asyncio.to_thread(build_go2rtc_yaml, msg["site"], msg["cameras"])
             write_config(yaml_content)
             restart_go2rtc()
@@ -2188,4 +2317,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
