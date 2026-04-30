@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { api } from "../lib/api"
+import { t } from "../lib/i18n"
 
 export default function Dashboard({ navigate }) {
   const [stats, setStats]       = useState(null)
@@ -44,40 +45,40 @@ export default function Dashboard({ navigate }) {
     <div>
       <div className="page-header">
         <div>
-          <div className="page-title">Dashboard</div>
-          <div className="page-sub">System overview — auto-refresh every 15s</div>
+          <div className="page-title">{t("dashboard")}</div>
+          <div className="page-sub">{t("dashboardSub")}</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={() => { load(); loadRealtime() }}>↻ Refresh</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => { load(); loadRealtime() }}>{t("refresh")}</button>
       </div>
 
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-value">{stats?.total_sites ?? "—"}</div>
-          <div className="stat-label">Total sites</div>
+          <div className="stat-label">{t("totalSites")}</div>
         </div>
         <div className="stat-card green">
           <div className="stat-value">{stats?.online_agents ?? "—"}</div>
-          <div className="stat-label">Online agents</div>
+          <div className="stat-label">{t("onlineAgents")}</div>
         </div>
         <div className={`stat-card ${offlineSites.length > 0 ? "red" : "green"}`}>
           <div className="stat-value">{(stats?.total_sites ?? 0) - (stats?.online_agents ?? 0)}</div>
-          <div className="stat-label">Offline agents</div>
+          <div className="stat-label">{t("offlineAgents")}</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{stats?.total_cameras ?? "—"}</div>
-          <div className="stat-label">Total cameras</div>
+          <div className="stat-label">{t("totalCameras")}</div>
         </div>
         <div className="stat-card green">
           <div className="stat-value">{stats?.online_streams ?? "—"}</div>
-          <div className="stat-label">Live streams</div>
+          <div className="stat-label">{t("liveStreams")}</div>
         </div>
         <div className="stat-card amber">
           <div className="stat-value">{fmtBps(realtime.rx_bps)}</div>
-          <div className="stat-label">Incoming (↓)</div>
+          <div className="stat-label">{t("incoming")}</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{fmtBps(realtime.tx_bps)}</div>
-          <div className="stat-label">Outgoing (↑)</div>
+          <div className="stat-label">{t("outgoing")}</div>
         </div>
       </div>
 
@@ -87,24 +88,24 @@ export default function Dashboard({ navigate }) {
         </div>
       )}
 
-      <div className="section-title">All sites</div>
+      <div className="section-title">{t("allSites")}</div>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Site</th>
-              <th>City</th>
-              <th>Agent</th>
-              <th>Cameras</th>
+              <th>{t("site")}</th>
+              <th>{t("city")}</th>
+              <th>{t("agent")}</th>
+              <th>{t("cameras")}</th>
               <th>Live streams</th>
-              <th>Last seen</th>
+              <th>{t("lastSeen")}</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {sites.length === 0 && (
               <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text2)", padding: 32 }}>
-                No sites yet — <button className="btn btn-primary btn-sm" onClick={() => navigate("sites")}>Add site</button>
+                {t("noSitesYet")} — <button className="btn btn-primary btn-sm" onClick={() => navigate("sites")}>{t("addSite")}</button>
               </td></tr>
             )}
             {sites.map(s => (
@@ -117,7 +118,7 @@ export default function Dashboard({ navigate }) {
                 <td>
                   <span className={`badge ${s.agent_online ? "badge-green" : "badge-red"}`}>
                     <span className={`dot ${s.agent_online ? "dot-green" : "dot-red"}`} />
-                    {s.agent_online ? "Online" : "Offline"}
+                    {s.agent_online ? t("online") : t("offline")}
                   </span>
                 </td>
                 <td>{s.camera_count}</td>
@@ -131,7 +132,7 @@ export default function Dashboard({ navigate }) {
                 </td>
                 <td>
                   <button className="btn btn-ghost btn-sm" onClick={() => navigate("site", s.id)}>
-                    Details →
+                    {t("details")}
                   </button>
                 </td>
               </tr>
@@ -152,7 +153,8 @@ function fmtBps(bps) {
 
 function relTime(ts) {
   const d = (Date.now() - new Date(ts).getTime()) / 1000
-  if (d < 60) return "just now"
-  if (d < 3600) return Math.floor(d / 60) + "m ago"
-  return Math.floor(d / 3600) + "h ago"
+  if (d < 60) return t("justNow")
+  if (d < 3600) return Math.floor(d / 60) + t("mAgo")
+  return Math.floor(d / 3600) + t("hAgo")
 }
+
