@@ -35,7 +35,7 @@ export default function Traffic() {
         </div>
       </div>
 
-      <TrafficChart siteId={null} hours={hours} source={source} title="{t("totalTraffic")}" />
+      <TrafficChart siteId={null} hours={hours} source={source} title={t("totalTraffic")} />
 
       <div className="section-title" style={{ marginTop: 24 }}>{t("perSite")}</div>
 
@@ -46,4 +46,5 @@ export default function Traffic() {
     </div>
   )
 }
+
 
