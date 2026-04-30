@@ -139,6 +139,14 @@ def _decode_jwt(token: str) -> dict:
     return _jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
 
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def _get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
@@ -187,6 +195,7 @@ TLS_CERT_DIR = os.environ.get("TLS_CERT_DIR", "/app/tls")
 TLS_FULLCHAIN_PATH = os.environ.get("TLS_FULLCHAIN_PATH", os.path.join(TLS_CERT_DIR, "fullchain.pem"))
 TLS_PRIVKEY_PATH = os.environ.get("TLS_PRIVKEY_PATH", os.path.join(TLS_CERT_DIR, "privkey.pem"))
 PUBLIC_WEB_SCHEME = os.environ.get("PUBLIC_WEB_SCHEME", "").strip().lower()
+MEDIA_URL_MODE = os.environ.get("MEDIA_URL_MODE", "relative").strip().lower()
 MTX_TOOLKIT_API = os.environ.get("MTX_TOOLKIT_API", "http://host.docker.internal:5002").rstrip("/")
 MTX_TOOLKIT_RTSP_URL = os.environ.get("MTX_TOOLKIT_RTSP_URL", f"rtsp://viewer:VIEWER_PASS@host.docker.internal:{RTSP_PORT}")
 MTX_TOOLKIT_NODE_NAME = os.environ.get("MTX_TOOLKIT_NODE_NAME", f"MediaMTX {PUBLIC_HOST}")
@@ -298,12 +307,20 @@ def _public_base_url() -> str:
     return f"{_public_scheme()}://{PUBLIC_HOST}"
 
 
+def _media_urls_absolute() -> bool:
+    return MEDIA_URL_MODE in {"absolute", "abs", "full"}
+
+
 def _public_hls_url(stream_path: str) -> str:
-    return f"{_public_base_url()}/hls/{stream_path}/index.m3u8"
+    if _media_urls_absolute():
+        return f"{_public_base_url()}/hls/{stream_path}/index.m3u8"
+    return f"/hls/{stream_path}/index.m3u8"
 
 
 def _public_webrtc_url(stream_path: str) -> str:
-    return f"{_public_base_url()}/webrtc/{stream_path}"
+    if _media_urls_absolute():
+        return f"{_public_base_url()}/webrtc/{stream_path}"
+    return f"/webrtc/{stream_path}"
 
 
 def _ws_scheme() -> str:
@@ -418,14 +435,6 @@ AGENT_SCRIPT_PATH = _resolve_runtime_path(
     ("agent", "agent.py"),
     ("fleet-agent", "agent.py"),
 )
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def _load_docker_client():
