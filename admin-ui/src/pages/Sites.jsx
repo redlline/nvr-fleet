@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api } from "../lib/api"
+import { t } from "../lib/i18n"
 
 const VENDOR_OPTIONS = [
   { value: "hikvision", label: "Hikvision" },
@@ -65,10 +66,10 @@ export default function Sites({ navigate }) {
     <div>
       <div className="page-header">
         <div>
-          <div className="page-title">Sites</div>
+          <div className="page-title">{t("sites")}</div>
           <div className="page-sub">Create the site first, then finish NVR setup from the mini-PC in LAN.</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>Add site</button>
+        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>{t("addSite")}</button>
       </div>
 
       {installInfo && (
@@ -101,21 +102,21 @@ export default function Sites({ navigate }) {
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>City</th>
-                <th>Vendor</th>
+                <th>{t("name")}</th>
+                <th>{t("city")}</th>
+                <th>{t("vendor")}</th>
                 <th>NVR</th>
                 <th>API port</th>
                 <th>Control port</th>
                 <th>Channels</th>
-                <th>Agent</th>
+                <th>{t("agent")}</th>
                 <th>Live</th>
-                <th>Actions</th>
+                <th>{t("actions")}</th>
               </tr>
             </thead>
             <tbody>
               {sites.length === 0 && (
-                <tr><td colSpan={10} className="empty-state">No sites yet. Add the first draft site and finish setup from the mini-PC.</td></tr>
+                <tr><td colSpan={10} className="empty-state">{t("noSitesYet")}. Add the first draft site and finish setup from the mini-PC.</td></tr>
               )}
               {sites.map((site) => (
                 <tr key={site.id}>
@@ -133,7 +134,7 @@ export default function Sites({ navigate }) {
                   <td>
                     <span className={`badge ${site.agent_online ? "badge-green" : "badge-red"}`}>
                       <span className={`dot ${site.agent_online ? "dot-green" : "dot-red"}`} />
-                      {site.agent_online ? "Online" : "Offline"}
+                      {site.agent_online ? t("online") : t("offline")}
                     </span>
                   </td>
                   <td>
@@ -143,7 +144,7 @@ export default function Sites({ navigate }) {
                   </td>
                   <td>
                     <div className="btn-group">
-                      <button className="btn btn-ghost btn-sm" onClick={() => navigate("site", site.id)}>Edit</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => navigate("site", site.id)}>{t("edit")}</button>
                       <button
                         className="btn btn-danger btn-sm"
                         disabled={deleting === site.id}
@@ -237,7 +238,7 @@ function AddSiteModal({ onClose, onSave }) {
               <input className="form-input" value={form.name} onChange={(e) => upd("name", e.target.value)} required placeholder="Warehouse A" />
             </div>
             <div className="form-group">
-              <label className="form-label">City</label>
+              <label className="form-label">{t("city")}</label>
               <input className="form-input" value={form.city} onChange={(e) => upd("city", e.target.value)} placeholder="Tashkent" />
             </div>
           </div>
@@ -334,7 +335,7 @@ function AddSiteModal({ onClose, onSave }) {
           )}
 
           <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>{t("cancel")}</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? <><span className="spinner" /> Creating...</> : "Create site"}
             </button>
@@ -344,3 +345,4 @@ function AddSiteModal({ onClose, onSave }) {
     </div>
   )
 }
+
