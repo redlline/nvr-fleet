@@ -16,6 +16,7 @@ export default function WatchPage({ siteId, streamPath, streamLabel, navigate })
     if (!video) return undefined
 
     let hls
+    let startupTimer = 0
     setError("")
     setLoading(true)
     setPlaying(false)
@@ -36,10 +37,9 @@ export default function WatchPage({ siteId, streamPath, streamLabel, navigate })
     video.addEventListener("waiting", handleWaiting)
     video.addEventListener("error", handleError)
 
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = hlsUrl
-      video.play().catch(() => {})
-    } else if (Hls.isSupported()) {
+    // Prefer hls.js in Chromium/Yandex/Firefox. Native HLS can report
+    // partial support and still fail to play live streams.
+    if (Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
@@ -49,6 +49,14 @@ export default function WatchPage({ siteId, streamPath, streamLabel, navigate })
       })
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data?.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad()
+            return
+          }
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError()
+            return
+          }
           setLoading(false)
           setPlaying(false)
           setError(data.details || "HLS playback error")
@@ -57,12 +65,24 @@ export default function WatchPage({ siteId, streamPath, streamLabel, navigate })
       })
       hls.loadSource(hlsUrl)
       hls.attachMedia(video)
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = hlsUrl
+      video.play().catch(() => {})
     } else {
       setLoading(false)
       setError("This browser does not support HLS playback")
     }
 
+    startupTimer = window.setTimeout(() => {
+      if (!video.currentTime) {
+        setLoading(false)
+        setPlaying(false)
+        setError("Stream is reachable but browser player did not start")
+      }
+    }, 12000)
+
     return () => {
+      window.clearTimeout(startupTimer)
       video.pause()
       video.removeAttribute("src")
       video.load()
