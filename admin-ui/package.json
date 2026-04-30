@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev":   "vite --configLoader native --host",
+    "dev": "vite --configLoader native --host",
     "build": "vite build --configLoader native",
     "preview": "vite preview --configLoader native"
   },
   "dependencies": {
     "hls.js": "^1.6.14",
-    "react":     "^18.2.0",
+    "lucide-react": "^0.383.0",
+    "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
