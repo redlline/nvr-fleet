@@ -30,9 +30,7 @@ services:
           - backend
 
   mtx-toolkit-frontend:
-    build:
-      context: ./addons/mtx-toolkit/frontend
-      dockerfile: Dockerfile
+    image: dan246/mtx-toolkit:latest
     container_name: mtx-toolkit-frontend
     restart: unless-stopped
     ports:
@@ -42,7 +40,8 @@ services:
       MTX_UI_PASSWORD: ${MTX_UI_PASSWORD:-changeme}
     volumes:
       - ./mtx-toolkit/frontend.nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - mtx_toolkit_htpasswd:/etc/nginx
+      - ./mtx-toolkit/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -113,5 +112,5 @@ services:
 volumes:
   mtx_toolkit_pg_data:
   mtx_toolkit_redis_data:
-  mtx_toolkit_htpasswd:
+
 
