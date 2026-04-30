@@ -14,13 +14,18 @@ import {
   Map, 
   Activity, 
   Settings,
-  LogOut
+  LogOut,
+  Users,
+  Globe,
 } from "lucide-react"
+import { t, getLang, setLang, LANGS } from "./lib/i18n"
+import UsersPage from "./pages/UsersPage"
 
 // ── Branding (edit these to rebrand) ──────────────────────────────────────────
 const BRAND = {
   name:      "CCTV CONNECT",
-  logoIcon:  "📹",
+  // Логотип: путь к файлу public/logo.png или эмодзи
+  logoIcon:  "/logo.png",
   copyright: "Created by Bullet2267 © 2026 NVR Fleet",
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,7 +45,7 @@ function readRoute() {
     return { page: "site", selectedSite, watchPath: "", watchLabel: "" }
   }
 
-  const allowedPages = new Set(["dashboard", "sites", "map", "traffic", "system"])
+  const allowedPages = new Set(["dashboard", "sites", "map", "traffic", "system", "users"])
   return {
     page: allowedPages.has(page) ? page : "dashboard",
     selectedSite: null,
@@ -113,27 +118,36 @@ export default function App() {
         {route.page === "map" && <NetworkMap navigate={navigate} />}
         {route.page === "traffic" && <Traffic />}
         {route.page === "system" && <System />}
+        {route.page === "users" && <UsersPage />}
       </main>
     </div>
   )
 }
 
 function Sidebar({ page, navigate, brand }) {
+  const [, forceUpdate] = useState(0)
+  useEffect(() => {
+    const handler = () => forceUpdate(n => n + 1)
+    window.addEventListener("langchange", handler)
+    return () => window.removeEventListener("langchange", handler)
+  }, [])
+
   const links = [
-    { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
-    { id: "sites",     icon: Server,          label: "Sites" },
-    { id: "map",       icon: Map,             label: "Network Map" },
-    { id: "traffic",   icon: Activity,        label: "Traffic" },
-    { id: "system",    icon: Settings,        label: "System" },
+    { id: "dashboard", icon: LayoutDashboard, label: t("dashboard") },
+    { id: "sites",     icon: Server,          label: t("sites") },
+    { id: "map",       icon: Map,             label: t("networkMap") },
+    { id: "traffic",   icon: Activity,        label: t("traffic") },
+    { id: "system",    icon: Settings,        label: t("system") },
+    { id: "users",     icon: Users,           label: t("users") },
   ]
 
   return (
     <nav className="sidebar">
       <div className="sidebar-logo">
         {brand.logoIcon && (
-          (typeof brand.logoIcon === 'string' && 
-           (brand.logoIcon.endsWith('.png') || brand.logoIcon.endsWith('.svg'))) ? (
-            <img src={brand.logoIcon} alt="logo" className="sidebar-logo-img" />
+          typeof brand.logoIcon === "string" ? (
+            <img src={brand.logoIcon} alt="logo" className="sidebar-logo-img"
+              onError={e => { e.target.style.display = "none" }} />
           ) : (
             <span className="sidebar-logo-icon">{brand.logoIcon}</span>
           )
@@ -168,12 +182,23 @@ function Sidebar({ page, navigate, brand }) {
         <span className="sidebar-icon">
           <LogOut size={18} strokeWidth={1.5} />
         </span>
-        Logout
+        {t("logout")}
       </button>
-      
+
+      <div className="sidebar-lang">
+        {LANGS.map(l => (
+          <button key={l.code}
+            className={"lang-btn" + (getLang() === l.code ? " active" : "")}
+            onClick={() => setLang(l.code)}>
+            {l.label}
+          </button>
+        ))}
+      </div>
+
       {brand.copyright && (
         <div className="sidebar-copyright">{brand.copyright}</div>
       )}
     </nav>
   )
 }
+
