@@ -383,7 +383,7 @@ export default function System() {
             fontSize: 12,
           }}
         >
-          {logsText || "{t("noLogsYet")}"}
+          {logsText || t("noLogsYet")}
         </pre>
       </Section>
 
@@ -488,5 +488,6 @@ function formatBytes(bytes) {
   }
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }
+
 
 
