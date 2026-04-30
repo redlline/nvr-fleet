@@ -200,6 +200,8 @@ MTX_TOOLKIT_API = os.environ.get("MTX_TOOLKIT_API", "http://host.docker.internal
 MTX_TOOLKIT_RTSP_URL = os.environ.get("MTX_TOOLKIT_RTSP_URL", f"rtsp://viewer:VIEWER_PASS@host.docker.internal:{RTSP_PORT}")
 MTX_TOOLKIT_NODE_NAME = os.environ.get("MTX_TOOLKIT_NODE_NAME", f"MediaMTX {PUBLIC_HOST}")
 MTX_TOOLKIT_ENVIRONMENT = os.environ.get("MTX_TOOLKIT_ENVIRONMENT", "production")
+MTX_TOOLKIT_SYNC_INTERVAL = float(os.environ.get("MTX_TOOLKIT_SYNC_INTERVAL", "60"))
+MTX_TOOLKIT_SYNC_ENABLED = os.environ.get("MTX_TOOLKIT_SYNC_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
 MEDIAMTX_HLS_PROXY_TARGET = os.environ.get("MEDIAMTX_HLS_PROXY_TARGET", "http://host.docker.internal:8888").rstrip("/")
 TUNNEL_HTTP_START = int(os.environ.get("TUNNEL_HTTP_START", "20080"))
 TUNNEL_HTTP_END = int(os.environ.get("TUNNEL_HTTP_END", "20179"))
@@ -1262,6 +1264,8 @@ async def _sync_tunnel_listeners(db: Session) -> None:
 @app.on_event("startup")
 async def startup_event() -> None:
     asyncio.create_task(_mtx_metrics_poll_loop())
+    if MTX_TOOLKIT_SYNC_ENABLED:
+        asyncio.create_task(_mtx_toolkit_sync_loop())
     db = SessionLocal()
     try:
         # Create default admin user if no users exist
@@ -1498,6 +1502,7 @@ async def create_site(data: SiteCreate, db: Session = Depends(get_db), _=Depends
 
     _rebuild_mediamtx(db)
     await _sync_tunnel_listeners(db)
+    asyncio.create_task(_schedule_mtx_toolkit_sync(0.5))
 
     install_cmd = (
         f"curl -fsSL {_public_base_url()}/install.sh | "
@@ -1527,6 +1532,7 @@ async def update_site(site_id: str, data: SiteUpdate, db: Session = Depends(get_
     db.refresh(site)
     await _sync_tunnel_listeners(db)
     await _deploy_config(site_id, db)
+    asyncio.create_task(_schedule_mtx_toolkit_sync(0.5))
     return _build_site_out(site, db)
 
 
@@ -1568,6 +1574,7 @@ async def delete_site(site_id: str, db: Session = Depends(get_db), _=Depends(req
 
     # 5. Close tunnel listeners for this site (frees ports)
     await _sync_tunnel_listeners(db)
+    asyncio.create_task(_schedule_mtx_toolkit_sync(0.5))
 
     logger.info(
         "Site %s (%s) deleted. Released ports: HTTP=%s RTSP=%s CTRL=%s",
@@ -2535,11 +2542,23 @@ def _mtx_toolkit_request(path: str, *, method: str = "GET", data: Optional[dict]
         headers["Content-Type"] = "application/json"
 
     req = urllib.request.Request(f"{MTX_TOOLKIT_API}{path}", data=body, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        raw = response.read()
-        if not raw:
-            return None
-        return json.loads(raw)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            raw = response.read()
+            if not raw:
+                return None
+            return json.loads(raw)
+    except urllib.error.HTTPError as exc:
+        try:
+            details = exc.read().decode("utf-8", errors="ignore")
+        except Exception:
+            details = ""
+        details = (details or "").strip().replace("\n", " ")
+        if len(details) > 400:
+            details = details[:400] + "..."
+        raise RuntimeError(f"MTX Toolkit API {method} {path} failed: HTTP {exc.code} {details}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"MTX Toolkit API {method} {path} failed: {exc}") from exc
 
 
 def _ensure_mtx_toolkit_node() -> Optional[int]:
@@ -2559,7 +2578,11 @@ def _ensure_mtx_toolkit_node() -> Optional[int]:
     }
 
     for node in nodes:
-        if node.get("name") == MTX_TOOLKIT_NODE_NAME or node.get("api_url") == MEDIAMTX_API:
+        if (
+            node.get("name") == MTX_TOOLKIT_NODE_NAME
+            or node.get("api_url") == MEDIAMTX_API
+            or node.get("rtsp_url") == MTX_TOOLKIT_RTSP_URL
+        ):
             node_id = int(node["id"])
             try:
                 _mtx_toolkit_request(f"/api/fleet/nodes/{node_id}", method="PUT", data=node_data)
@@ -2585,12 +2608,27 @@ def _sync_mtx_toolkit_node_streams() -> None:
     try:
         _mtx_toolkit_request(f"/api/fleet/nodes/{node_id}/sync", method="POST", data={})
     except Exception as exc:
-        logger.info("MTX Toolkit stream sync skipped: %s", exc)
+        logger.info("MTX Toolkit node sync failed, trying sync-all: %s", exc)
+        try:
+            _mtx_toolkit_request("/api/fleet/sync-all", method="POST", data={})
+        except Exception as sync_exc:
+            logger.info("MTX Toolkit sync-all failed: %s", sync_exc)
 
 
 async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
     await asyncio.sleep(delay)
     await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+
+
+async def _mtx_toolkit_sync_loop() -> None:
+    await asyncio.sleep(8.0)
+    interval = MTX_TOOLKIT_SYNC_INTERVAL if MTX_TOOLKIT_SYNC_INTERVAL > 10 else 10.0
+    while True:
+        try:
+            await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+        except Exception as exc:
+            logger.info("MTX Toolkit periodic sync skipped: %s", exc)
+        await asyncio.sleep(interval)
 
 
 
