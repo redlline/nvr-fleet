@@ -76,3 +76,14 @@ class TrafficSample(Base):
     rx_bytes    = Column(BigInteger, default=0)
     tx_bytes    = Column(BigInteger, default=0)
     ts          = Column(DateTime, default=datetime.utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+    id            = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    username      = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    role          = Column(String, nullable=False, default="viewer")
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    is_active     = Column(Boolean, default=True)
+    allowed_sites = Column(String, default="[]")  # JSON list of site_ids, empty = all

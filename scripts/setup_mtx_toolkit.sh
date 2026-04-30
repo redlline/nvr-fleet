@@ -55,7 +55,7 @@ patch_text(
     "backend/app/services/thumbnail_service.py",
     '# HLS port (same as in streams.py)\nHLS_PORT = int(os.getenv("MEDIAMTX_HLS_PORT", "8893"))\n',
     '# HLS proxy (go through fleet-server so auth and cookie handling stay centralized)\n'
-    'HLS_PROXY_BASE = os.getenv("MEDIAMTX_HLS_PROXY_BASE", "http://host.docker.internal:8765/hls").rstrip("/")\n'
+    'HLS_PROXY_BASE = os.getenv("MEDIAMTX_HLS_PROXY_BASE", "http://fleet-server:8765/hls").rstrip("/")\n'
     'HLS_PORT = int(os.getenv("MEDIAMTX_HLS_PORT", "8888"))\n',
 )
 

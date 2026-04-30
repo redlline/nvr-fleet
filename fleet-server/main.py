@@ -28,7 +28,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine, Base
-from models import Site, Camera, Agent, StreamStat, TrafficSample
+from models import Site, Camera, Agent, StreamStat, TrafficSample, User
 from schemas import (
     SiteCreate, SiteUpdate, SiteOut,
     CameraCreate, CameraUpdate, CameraOut,
@@ -426,12 +426,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-def require_admin(creds: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    if not creds or creds.credentials != ADMIN_TOKEN:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    return creds.credentials
 
 
 def _load_docker_client():
@@ -1276,6 +1270,7 @@ async def startup_event() -> None:
     except Exception as exc:
         logger.warning("Could not create default admin: %s", exc)
         db.rollback()
+    try:
         mediamtx_changed = _rebuild_mediamtx(db)
         await _sync_tunnel_listeners(db)
         if mediamtx_changed:
@@ -1285,6 +1280,8 @@ async def startup_event() -> None:
             except Exception as exc:
                 logger.warning("MediaMTX restart on startup sync failed: %s", exc)
         await asyncio.to_thread(_sync_mtx_toolkit_node_streams)
+    except Exception as exc:
+        logger.warning("Startup sync failed: %s", exc)
     finally:
         db.close()
 
@@ -1541,13 +1538,13 @@ async def delete_site(site_id: str, db: Session = Depends(get_db), _=Depends(req
         pass  # agent may be offline
 
     # 2. Disconnect active WebSocket
-    ws = _agent_connections.get(site_id)
+    ws = active_agents.get(site_id)
     if ws:
         try:
             await ws.close()
         except Exception:
             pass
-        _agent_connections.pop(site_id, None)
+        active_agents.pop(site_id, None)
 
     # 3. Remove from DB
     db.query(Camera).filter_by(site_id=site_id).delete()
@@ -2598,17 +2595,6 @@ async def _schedule_mtx_toolkit_sync(delay: float = 4.0) -> None:
 
 
 
-class User(Base):
-    """Panel user with role-based access."""
-    __tablename__ = "users"
-    id            = Column(Integer, primary_key=True, index=True)
-    username      = Column(String, unique=True, nullable=False, index=True)
-    password_hash = Column(String, nullable=False)
-    role          = Column(String, nullable=False, default="viewer")
-    # Roles: admin | operator | viewer
-    created_at    = Column(DateTime, default=datetime.utcnow)
-    is_active     = Column(Boolean, default=True)
-    allowed_sites = Column(String, default="[]")  # JSON list of site_ids, empty = all
 
 
 
@@ -2695,6 +2681,3 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
-
-
-
