@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { api } from "../lib/api"
+import { t } from "../lib/i18n"
 import TrafficChart from "../components/TrafficChart"
 
 export default function Traffic() {
@@ -15,8 +16,8 @@ export default function Traffic() {
     <div>
       <div className="page-header">
         <div>
-          <div className="page-title">Traffic</div>
-          <div className="page-sub">Bandwidth usage across all sites</div>
+          <div className="page-title">{t("traffic")}</div>
+          <div className="page-sub">{t("trafficSub")}</div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <select className="form-input" style={{ width: 160 }} value={source}
@@ -34,9 +35,9 @@ export default function Traffic() {
         </div>
       </div>
 
-      <TrafficChart siteId={null} hours={hours} source={source} title="Total traffic — all sites" />
+      <TrafficChart siteId={null} hours={hours} source={source} title="{t("totalTraffic")}" />
 
-      <div className="section-title" style={{ marginTop: 24 }}>Per site</div>
+      <div className="section-title" style={{ marginTop: 24 }}>{t("perSite")}</div>
 
       {sites.map(s => (
         <TrafficChart key={s.id} siteId={s.id} hours={hours} source={source}
@@ -45,3 +46,4 @@ export default function Traffic() {
     </div>
   )
 }
+
