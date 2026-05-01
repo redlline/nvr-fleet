@@ -106,11 +106,11 @@ export default function Sites({ navigate }) {
                 <th>{t("city")}</th>
                 <th>{t("vendor")}</th>
                 <th>NVR</th>
-                <th>API port</th>
-                <th>Control port</th>
-                <th>Channels</th>
+                <th>{t("apiPort")}</th>
+                <th>{t("controlPort")}</th>
+                <th>{t("channels")}</th>
                 <th>{t("agent")}</th>
-                <th>Live</th>
+                <th>{t("live")}</th>
                 <th>{t("actions")}</th>
               </tr>
             </thead>
@@ -345,5 +345,6 @@ function AddSiteModal({ onClose, onSave }) {
     </div>
   )
 }
+
 
 
