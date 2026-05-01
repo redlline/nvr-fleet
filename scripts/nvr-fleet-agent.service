@@ -1,0 +1,25 @@
+[Unit]
+Description=NVR Fleet Agent
+Documentation=https://github.com/redlline/NVR-Fleet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/nvr-fleet-agent
+ExecStart=/opt/nvr-fleet-agent/.venv/bin/python /opt/nvr-fleet-agent/agent.py
+Restart=always
+RestartSec=5
+StartLimitInterval=0
+
+# Сброс задержки при успешной работе > 60 сек
+StartLimitBurst=999999
+
+# Логи
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nvr-fleet-agent
+
+[Install]
+WantedBy=multi-user.target
