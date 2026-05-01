@@ -96,23 +96,11 @@ export default function App() {
 
   const [userRole, setUserRole] = useState(() => getRoleFromToken())
 
-  async function fetchRole() {
-    try {
-      const me = await api.getMe()
-      setUserRole(me.role)
-      localStorage.setItem("nvr_role", me.role)
-    } catch {
-      setUserRole(getRoleFromToken())
-    }
-  }
-
   useEffect(() => {
     document.title = BRAND.name
   }, [])
 
-  useEffect(() => {
-    if (authed) fetchRole()
-  }, [authed])
+  // Role is decoded from JWT token on mount - no need for extra effect
 
   useEffect(() => {
     const onPopState = () => setRoute(readRoute())
@@ -234,6 +222,7 @@ function Sidebar({ page, navigate, brand }) {
     </nav>
   )
 }
+
 
 
 
