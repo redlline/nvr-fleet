@@ -1448,7 +1448,7 @@ async def call_agent(site_id: str, payload: dict, timeout: int = 20) -> dict:
 # ─── Sites ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/sites", response_model=list[SiteOut])
-def list_sites(db: Session = Depends(get_db), _=Depends(require_admin)):
+def list_sites(db: Session = Depends(get_db), _=Depends(require_viewer)):
     sites = db.query(Site).all()
     return [_build_site_out(site, db) for site in sites]
 
@@ -1512,7 +1512,7 @@ async def create_site(data: SiteCreate, db: Session = Depends(get_db), _=Depends
 
 
 @app.get("/api/sites/{site_id}", response_model=SiteOut)
-def get_site(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+def get_site(site_id: str, db: Session = Depends(get_db), _=Depends(require_viewer)):
     site = db.query(Site).filter_by(id=site_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
@@ -1590,7 +1590,7 @@ async def delete_site(site_id: str, db: Session = Depends(get_db), _=Depends(req
 # ─── Cameras ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/sites/{site_id}/cameras", response_model=list[CameraOut])
-def list_cameras(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+def list_cameras(site_id: str, db: Session = Depends(get_db), _=Depends(require_viewer)):
     _ensure_site_exists(site_id, db)
     return db.query(Camera).filter_by(site_id=site_id).order_by(Camera.channel).all()
 
@@ -1789,14 +1789,14 @@ async def replace_agent_cameras(
 # ─── Streams & Traffic ────────────────────────────────────────────────────────
 
 @app.get("/api/sites/{site_id}/streams")
-def get_stream_stats(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+def get_stream_stats(site_id: str, db: Session = Depends(get_db), _=Depends(require_viewer)):
     _ensure_site_exists(site_id, db)
     stats = db.query(StreamStat).filter_by(site_id=site_id).all()
     return [StreamStatOut.model_validate(s) for s in stats]
 
 
 @app.get("/api/sites/{site_id}/traffic")
-def get_traffic(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_admin)):
+def get_traffic(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_viewer)):
     _ensure_site_exists(site_id, db)
     since = datetime.utcnow() - timedelta(hours=hours)
     samples = (db.query(TrafficSample)
@@ -1807,7 +1807,7 @@ def get_traffic(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=D
 
 
 @app.get("/api/traffic/total")
-def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_admin)):
+def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_viewer)):
     since = datetime.utcnow() - timedelta(hours=hours)
     samples = (db.query(TrafficSample)
                .filter(TrafficSample.ts >= since)
@@ -1818,14 +1818,14 @@ def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(
 
 
 @app.get("/api/sites/{site_id}/traffic/mtx")
-def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_admin)):
+def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_viewer)):
     """Traffic from MediaMTX metrics API (per site)."""
     samples = _parse_mtx_metrics(site_id, hours)
     return samples
 
 
 @app.get("/api/traffic/total/mtx")
-def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_admin)):
+def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_viewer)):
     """Traffic from MediaMTX metrics API (all sites)."""
     samples = _parse_mtx_metrics(None, hours)
     return samples
@@ -1952,7 +1952,7 @@ async def _mtx_metrics_poll_loop():
 
 
 @app.get("/api/traffic/realtime")
-def get_traffic_realtime(_=Depends(require_admin)):
+def get_traffic_realtime(_=Depends(require_viewer)):
     """Real-time traffic: latest MTX metrics sample (rx/tx bytes per second)."""
     import re
     try:
@@ -2227,7 +2227,7 @@ async def import_backup(
 
 
 @app.get("/api/dashboard")
-def dashboard(db: Session = Depends(get_db), _=Depends(require_admin)):
+def dashboard(db: Session = Depends(get_db), _=Depends(require_viewer)):
     total_sites    = db.query(Site).count()
     total_cameras  = db.query(Camera).count()
     online_agents  = db.query(Agent).filter_by(online=True).count()
@@ -2278,7 +2278,7 @@ async def drain_redeploy_site(site_id: str, db: Session = Depends(get_db), _=Dep
 # ─── Map ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/map")
-def get_map_data(db: Session = Depends(get_db), _=Depends(require_admin)):
+def get_map_data(db: Session = Depends(get_db), _=Depends(require_viewer)):
     sites = db.query(Site).all()
     result = []
     for s in sites:
@@ -2728,4 +2728,5 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
