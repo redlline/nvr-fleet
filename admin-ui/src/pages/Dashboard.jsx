@@ -97,7 +97,7 @@ export default function Dashboard({ navigate }) {
               <th>{t("city")}</th>
               <th>{t("agent")}</th>
               <th>{t("cameras")}</th>
-              <th>Live streams</th>
+              <th>{t("liveStreams")}</th>
               <th>{t("lastSeen")}</th>
               <th></th>
             </tr>
@@ -157,4 +157,5 @@ function relTime(ts) {
   if (d < 3600) return Math.floor(d / 60) + t("mAgo")
   return Math.floor(d / 3600) + t("hAgo")
 }
+
 
