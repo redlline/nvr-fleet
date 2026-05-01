@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api } from "../lib/api"
+import { t } from "../lib/i18n"
 import ArchiveTab from "../components/ArchiveTab"
 import CamerasTab from "../components/CamerasTab"
 import StreamsTab from "../components/StreamsTab"
@@ -92,7 +93,7 @@ export default function SiteDetail({ siteId, navigate }) {
 
   return (
     <div>
-      <button className="back-btn" onClick={() => navigate("sites")}>Back to sites</button>
+      <button className="back-btn" onClick={() => navigate("sites")}>{t("backToSites")}</button>
 
       <div className="page-header" style={{ alignItems: "flex-start" }}>
         <div>
@@ -100,7 +101,7 @@ export default function SiteDetail({ siteId, navigate }) {
             {site.name}
             <span className={`badge ${site.agent_online ? "badge-green" : "badge-red"}`}>
               <span className={`dot ${site.agent_online ? "dot-green" : "dot-red"}`} />
-              {site.agent_online ? "Online" : "Offline"}
+              {site.agent_online ? t("online") : t("offline")}
             </span>
             {!isConfigured && <span className="badge badge-gray">Draft</span>}
           </div>
@@ -112,10 +113,10 @@ export default function SiteDetail({ siteId, navigate }) {
           )}
         </div>
         <div className="btn-group" style={{ flexShrink: 0 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowEdit(true)}>Edit</button>
-          <button className="btn btn-ghost btn-sm" onClick={handleDeploy}>Deploy config</button>
-          <button className="btn btn-ghost btn-sm" onClick={handleDrainRedeploy}>Drain + redeploy</button>
-          <button className="btn btn-ghost btn-sm" onClick={handleRestart}>Restart agent</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowEdit(true)}>{t("edit")}</button>
+          <button className="btn btn-ghost btn-sm" onClick={handleDeploy}>{t("deployConfig")}</button>
+          <button className="btn btn-ghost btn-sm" onClick={handleDrainRedeploy}>{t("drainRedeploy")}</button>
+          <button className="btn btn-ghost btn-sm" onClick={handleRestart}>{t("restartAgent")}</button>
         </div>
       </div>
 
@@ -124,7 +125,7 @@ export default function SiteDetail({ siteId, navigate }) {
       <div className="stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-value">{site.camera_count}</div>
-          <div className="stat-label">Cameras</div>
+          <div className="stat-label">{t("cameras")}</div>
         </div>
         <div className={`stat-card ${site.online_streams > 0 ? "green" : ""}`}>
           <div className="stat-value">{site.online_streams}</div>
@@ -158,7 +159,7 @@ export default function SiteDetail({ siteId, navigate }) {
       )}
 
       <div className="card" style={{ padding: 16, marginBottom: 20 }}>
-        <div style={{ fontWeight: 600, marginBottom: 10 }}>Thick client tunnel</div>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>{t("thickClient")}</div>
         <div style={{ color: "var(--text2)", fontSize: 12, marginBottom: 10 }}>
           Use the public server host and these per-site ports in iVMS-4200 or a similar client.
           {!isConfigured && " The ports are already reserved; the actual NVR target becomes active after local setup on the mini-PC."}
@@ -352,4 +353,5 @@ function EditSiteModal({ site, onClose, onSave }) {
     </div>
   )
 }
+
 
