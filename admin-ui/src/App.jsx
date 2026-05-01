@@ -77,6 +77,35 @@ export default function App() {
   const [authed, setAuthed] = useState(!!api.getToken())
   const [route, setRoute] = useState(() => readRoute())
 
+  // Decode role from JWT without API call
+  function getRoleFromToken() {
+    const token = api.getToken()
+    if (!token) return "viewer"
+    try {
+      const parts = token.split(".")
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]))
+        if (payload.role) {
+          localStorage.setItem("nvr_role", payload.role)
+          return payload.role
+        }
+      }
+    } catch {}
+    return localStorage.getItem("nvr_role") || "viewer"
+  }
+
+  const [userRole, setUserRole] = useState(() => getRoleFromToken())
+
+  async function fetchRole() {
+    try {
+      const me = await api.getMe()
+      setUserRole(me.role)
+      localStorage.setItem("nvr_role", me.role)
+    } catch {
+      setUserRole(getRoleFromToken())
+    }
+  }
+
   useEffect(() => {
     if (authed) fetchRole()
     document.title = BRAND.name
@@ -106,8 +135,8 @@ export default function App() {
       <Sidebar page={route.page} navigate={navigate} brand={BRAND} />
       <main className="content">
         {route.page === "dashboard" && <Dashboard navigate={navigate} />}
-        {route.page === "sites" && <Sites navigate={navigate} />}
-        {route.page === "site" && route.selectedSite && <SiteDetail siteId={route.selectedSite} navigate={navigate} />}
+        {route.page === "sites" && <Sites navigate={navigate} role={userRole} />}
+        {route.page === "site" && route.selectedSite && <SiteDetail siteId={route.selectedSite} navigate={navigate} role={userRole} />}
         {route.page === "watch" && route.watchPath && (
           <WatchPage
             siteId={route.selectedSite}
@@ -202,5 +231,6 @@ function Sidebar({ page, navigate, brand }) {
     </nav>
   )
 }
+
 
 
