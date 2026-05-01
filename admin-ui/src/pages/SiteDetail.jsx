@@ -129,11 +129,11 @@ export default function SiteDetail({ siteId, navigate }) {
         </div>
         <div className={`stat-card ${site.online_streams > 0 ? "green" : ""}`}>
           <div className="stat-value">{site.online_streams}</div>
-          <div className="stat-label">Live streams</div>
+          <div className="stat-label">{t("liveStreams")}</div>
         </div>
         <div className={`stat-card ${isConfigured ? "" : "amber"}`}>
-          <div className="stat-value" style={{ fontSize: 18 }}>{isConfigured ? site.nvr_vendor : "Draft"}</div>
-          <div className="stat-label">{isConfigured ? "Archive adapter" : "Onboarding state"}</div>
+          <div className="stat-value" style={{ fontSize: 18 }}>{isConfigured ? site.nvr_vendor : t("draft")}</div>
+          <div className="stat-label">{isConfigured ? t("archiveAdapter") : t("onboardingState")}</div>
         </div>
         <div className="stat-card">
           <div className="stat-value" style={{ fontSize: 18 }}>{site.id}</div>
@@ -161,7 +161,7 @@ export default function SiteDetail({ siteId, navigate }) {
       <div className="card" style={{ padding: 16, marginBottom: 20 }}>
         <div style={{ fontWeight: 600, marginBottom: 10 }}>{t("thickClient")}</div>
         <div style={{ color: "var(--text2)", fontSize: 12, marginBottom: 10 }}>
-          Use the public server host and these per-site ports in iVMS-4200 or a similar client.
+          {t("thickClientDesc")}
           {!isConfigured && " The ports are already reserved; the actual NVR target becomes active after local setup on the mini-PC."}
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -253,37 +253,37 @@ function EditSiteModal({ site, onClose, onSave }) {
   return (
     <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && onClose()}>
       <div className="modal">
-        <div className="modal-title">Edit site - {site.name}</div>
+        <div className="modal-title">{t("editSite")} - {site.name}</div>
         {error && <div className="alert alert-error">{error}</div>}
         <form onSubmit={submit}>
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Site name</label>
+              <label className="form-label">{t("name")}</label>
               <input className="form-input" value={form.name} onChange={(e) => upd("name", e.target.value)} />
             </div>
             <div className="form-group">
-              <label className="form-label">City</label>
+              <label className="form-label">{t("city")}</label>
               <input className="form-input" value={form.city} onChange={(e) => upd("city", e.target.value)} />
             </div>
           </div>
 
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Latitude</label>
+              <label className="form-label">{t("latitude")}</label>
               <input className="form-input" type="number" step="any" value={form.lat} onChange={(e) => upd("lat", e.target.value)} />
             </div>
             <div className="form-group">
-              <label className="form-label">Longitude</label>
+              <label className="form-label">{t("longitude")}</label>
               <input className="form-input" type="number" step="any" value={form.lon} onChange={(e) => upd("lon", e.target.value)} />
             </div>
           </div>
           <div style={{ color: "var(--text2)", fontSize: 12, marginTop: -8, marginBottom: 14 }}>
-            Coordinates are optional and only used for the Network Map.
+            {t("coordsHint")}
           </div>
 
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Archive adapter</label>
+              <label className="form-label">{t("archiveAdapter")}</label>
               <select className="form-input" value={form.nvr_vendor} onChange={(e) => upd("nvr_vendor", e.target.value)}>
                 {VENDOR_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
@@ -291,21 +291,21 @@ function EditSiteModal({ site, onClose, onSave }) {
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Default stream type</label>
+              <label className="form-label">{t("defaultStream")}</label>
               <select className="form-input" value={form.stream_type} onChange={(e) => upd("stream_type", e.target.value)}>
-                <option value="main">Main (high quality)</option>
-                <option value="sub">Sub (low bandwidth)</option>
+                <option value="main">{t("mainStream")}</option>
+                <option value="sub">{t("subStream")}</option>
               </select>
             </div>
           </div>
 
           <div className="alert alert-info" style={{ marginBottom: 16 }}>
-            You can leave NVR IP empty here and finish NVR setup from the mini-PC local panel later.
+            {t("nvrIpHint")}
           </div>
 
           <div className="form-row-3">
             <div className="form-group" style={{ gridColumn: "1/3" }}>
-              <label className="form-label">NVR IP</label>
+              <label className="form-label">{t("nvrIp")}</label>
               <input className="form-input" value={form.nvr_ip} onChange={(e) => upd("nvr_ip", e.target.value)} placeholder="Leave blank for local setup flow" />
             </div>
             <div className="form-group">
@@ -327,7 +327,7 @@ function EditSiteModal({ site, onClose, onSave }) {
 
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">NVR username</label>
+              <label className="form-label">{t("nvrUsername")}</label>
               <input className="form-input" value={form.nvr_user} onChange={(e) => upd("nvr_user", e.target.value)} />
             </div>
             <div className="form-group">
@@ -353,6 +353,7 @@ function EditSiteModal({ site, onClose, onSave }) {
     </div>
   )
 }
+
 
 
 
