@@ -22,15 +22,15 @@ export default function Traffic() {
         <div style={{ display: "flex", gap: 10 }}>
           <select className="form-input" style={{ width: 160 }} value={source}
             onChange={e => setSource(e.target.value)}>
-            <option value="go2rtc">Source: go2rtc</option>
-            <option value="mediamtx">Source: MediaMTX</option>
+            <option value="go2rtc">{t("srcGo2rtc")}</option>
+            <option value="mediamtx">{t("srcMediamtx")}</option>
           </select>
           <select className="form-input" style={{ width: 140 }} value={hours}
             onChange={e => setHours(Number(e.target.value))}>
-            <option value={1}>Last 1 hour</option>
-            <option value={6}>Last 6 hours</option>
-            <option value={24}>Last 24 hours</option>
-            <option value={168}>Last 7 days</option>
+            <option value={1}>{t("last1h")}</option>
+            <option value={6}>{t("last6h")}</option>
+            <option value={24}>{t("last24h")}</option>
+            <option value={168}>{t("last7d")}</option>
           </select>
         </div>
       </div>
@@ -46,5 +46,6 @@ export default function Traffic() {
     </div>
   )
 }
+
 
 
