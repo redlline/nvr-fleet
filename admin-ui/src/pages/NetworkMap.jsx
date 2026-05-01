@@ -114,12 +114,12 @@ export default function NetworkMap({ navigate }) {
           <div style="color:#666; font-size:12px">${safeCity}</div>
           <div style="margin-top:8px; font-size:12px">
             <span style="color:${site.online ? "#22c55e" : "#ef4444"}">
-              ● ${site.online ? "Online" : "Offline"}
+              ● ${site.online ? t("online") : t("offline")}
             </span>
           </div>
           <div style="font-size:12px; margin-top:4px">
             📷 ${site.cameras} cameras · 
-            📡 ${site.online_streams} live
+            📡 ${site.online_streams} {t("live")}
           </div>
         </div>
       `)
@@ -134,8 +134,8 @@ export default function NetworkMap({ navigate }) {
           <div className="page-sub">{t("networkMapSub")}</div>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 13 }}>
-          <span style={{ color: "#22c55e" }}>● Online: {sites.filter(s => s.online).length}</span>
-          <span style={{ color: "#ef4444" }}>● Offline: {sites.filter(s => !s.online).length}</span>
+          <span style={{ color: "#22c55e" }}>● {t("online")}: {sites.filter(s => s.online).length}</span>
+          <span style={{ color: "#ef4444" }}>● {t("offline")}: {sites.filter(s => !s.online).length}</span>
         </div>
       </div>
 
@@ -174,11 +174,11 @@ export default function NetworkMap({ navigate }) {
                 <div style={{ fontWeight: 500 }}>{s.name}</div>
                 <span className={`badge ${s.online ? "badge-green" : "badge-red"}`} style={{ fontSize: 11 }}>
                   <span className={`dot ${s.online ? "dot-green" : "dot-red"}`} />
-                  {s.online ? "On" : "Off"}
+                  {s.online ? t("online") : t("offline")}
                 </span>
               </div>
               <div style={{ color: "var(--text2)", fontSize: 12, marginTop: 4 }}>
-                {s.city || "No city"} · {s.cameras} cams · {s.online_streams} live
+                {s.city || "No city"} · {s.cameras} {t("cameras")} · {s.online_streams} {t("live")}
               </div>
             </div>
           ))}
@@ -197,11 +197,12 @@ export default function NetworkMap({ navigate }) {
           <div style={{ display: "flex", gap: 24, marginTop: 12, fontSize: 13, color: "var(--text2)" }}>
             <span>📍 {selected.lat?.toFixed(4)}, {selected.lon?.toFixed(4)}</span>
             <span>📷 {selected.cameras} cameras</span>
-            <span>📡 {selected.online_streams} live streams</span>
+            <span>📡 {selected.online_streams} {t("live")} streams</span>
           </div>
         </div>
       )}
     </div>
   )
 }
+
 
