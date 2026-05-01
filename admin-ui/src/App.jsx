@@ -78,6 +78,7 @@ export default function App() {
   const [route, setRoute] = useState(() => readRoute())
 
   useEffect(() => {
+    if (authed) fetchRole()
     document.title = BRAND.name
   }, [])
 
@@ -87,7 +88,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState)
   }, [])
 
-  if (!authed) return <Login onLogin={() => setAuthed(true)} brandName={BRAND.name} />
+  if (!authed) return <Login onLogin={() => { setAuthed(true); fetchRole() }} brandName={BRAND.name} />
 
   function navigate(nextPage, site = null, extra = {}) {
     const nextRoute = {
@@ -118,7 +119,7 @@ export default function App() {
         {route.page === "map" && <NetworkMap navigate={navigate} />}
         {route.page === "traffic" && <Traffic />}
         {route.page === "system" && <System />}
-        {route.page === "users" && <UsersPage />}
+        {route.page === "users" && <UsersPage role={userRole} />}
       </main>
     </div>
   )
@@ -138,7 +139,7 @@ function Sidebar({ page, navigate, brand }) {
     { id: "map",       icon: Map,             label: t("networkMap") },
     { id: "traffic",   icon: Activity,        label: t("traffic") },
     { id: "system",    icon: Settings,        label: t("system") },
-    { id: "users",     icon: Users,           label: t("users") },
+    ...(userRole === "admin" ? [{ id: "users", icon: Users, label: t("users") }] : []),
   ]
 
   return (
@@ -201,4 +202,5 @@ function Sidebar({ page, navigate, brand }) {
     </nav>
   )
 }
+
 
