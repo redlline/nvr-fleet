@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { api } from "../lib/api"
+import { t } from "../lib/i18n"
 
 // Leaflet loaded from CDN via index.html
 const L = () => window.L
@@ -129,8 +130,8 @@ export default function NetworkMap({ navigate }) {
     <div>
       <div className="page-header">
         <div>
-          <div className="page-title">Network Map</div>
-          <div className="page-sub">Geographic overview of all sites</div>
+          <div className="page-title">{t("networkMap")}</div>
+          <div className="page-sub">{t("networkMapSub")}</div>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 13 }}>
           <span style={{ color: "#22c55e" }}>● Online: {sites.filter(s => s.online).length}</span>
@@ -203,3 +204,4 @@ export default function NetworkMap({ navigate }) {
     </div>
   )
 }
+
