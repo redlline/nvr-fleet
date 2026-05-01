@@ -70,7 +70,7 @@ export default function Sites({ navigate, role = "viewer" }) {
           <div className="page-title">{t("sites")}</div>
           <div className="page-sub">{t("sitesSub")}</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>{t("addSite")}</button>}
+        {isAdmin && <button className="btn btn-primary" onClick={() => setShowAdd(true)}>{t("addSite")}</button>}
       </div>
 
       {installInfo && (
@@ -346,6 +346,7 @@ function AddSiteModal({ onClose, onSave }) {
     </div>
   )
 }
+
 
 
 
