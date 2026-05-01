@@ -194,8 +194,8 @@ export default function SiteDetail({ siteId, navigate }) {
       {tab === "archive" && <ArchiveTab siteId={siteId} publicHost={window.location.hostname} />}
       {tab === "traffic" && (
         <div>
-          <TrafficChart siteId={siteId} hours={1} title="{t("trafficLast1h")}" />
-          <TrafficChart siteId={siteId} hours={24} title="{t("trafficLast24h")}" />
+          <TrafficChart siteId={siteId} hours={1} title={t("trafficLast1h")} />
+          <TrafficChart siteId={siteId} hours={24} title={t("trafficLast24h")} />
         </div>
       )}
 
@@ -353,6 +353,7 @@ function EditSiteModal({ site, onClose, onSave }) {
     </div>
   )
 }
+
 
 
 
