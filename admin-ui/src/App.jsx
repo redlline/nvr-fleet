@@ -107,9 +107,12 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (authed) fetchRole()
     document.title = BRAND.name
   }, [])
+
+  useEffect(() => {
+    if (authed) fetchRole()
+  }, [authed])
 
   useEffect(() => {
     const onPopState = () => setRoute(readRoute())
@@ -117,7 +120,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState)
   }, [])
 
-  if (!authed) return <Login onLogin={() => { setAuthed(true); fetchRole() }} brand={BRAND} />
+  if (!authed) return <Login onLogin={() => setAuthed(true)} brand={BRAND} />
 
   function navigate(nextPage, site = null, extra = {}) {
     const nextRoute = {
@@ -231,6 +234,7 @@ function Sidebar({ page, navigate, brand }) {
     </nav>
   )
 }
+
 
 
 
