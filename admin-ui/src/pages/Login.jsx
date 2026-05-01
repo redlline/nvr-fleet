@@ -2,7 +2,9 @@ import { useState } from "react"
 import { api } from "../lib/api"
 import { t, getLang, setLang, LANGS } from "../lib/i18n"
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, brand = {} }) {
+  const brandName = brand.name || "NVR Fleet"
+  const brandLogo = brand.logoIcon || null
   const [mode, setMode]       = useState("credentials")  // "credentials" | "token"
   const [username, setUser]   = useState("")
   const [password, setPass]   = useState("")
@@ -38,8 +40,16 @@ export default function Login({ onLogin }) {
         background: "var(--bg2)", border: "1px solid var(--border)",
         borderRadius: 12, padding: 40, width: 380, boxShadow: "var(--shadow)",
       }}>
-        <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4, color: "var(--accent2)" }}>
-          NVR Fleet
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          {brandLogo && typeof brandLogo === "string" ? (
+            <img src={brandLogo} alt="logo" style={{ height: 32, width: "auto", objectFit: "contain" }}
+              onError={e => { e.target.style.display = "none" }} />
+          ) : brandLogo ? (
+            <span style={{ fontSize: 28 }}>{brandLogo}</span>
+          ) : null}
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent2)" }}>
+            {brandName}
+          </div>
         </div>
         <div style={{ color: "var(--text2)", fontSize: 13, marginBottom: 24 }}>
           {t("loginSubtitle")}
@@ -120,3 +130,4 @@ export default function Login({ onLogin }) {
     </div>
   )
 }
+
