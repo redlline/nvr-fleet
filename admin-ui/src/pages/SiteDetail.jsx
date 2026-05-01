@@ -29,7 +29,8 @@ function siteSummary(site) {
   return parts.join(" | ")
 }
 
-export default function SiteDetail({ siteId, navigate }) {
+export default function SiteDetail({ siteId, navigate, role = "viewer" }) {
+  const isAdmin = role === "admin"
   const [site, setSite] = useState(null)
   const [tab, setTab] = useState("cameras")
   const [loading, setLoading] = useState(true)
@@ -112,12 +113,14 @@ export default function SiteDetail({ siteId, navigate }) {
             </div>
           )}
         </div>
-        <div className="btn-group" style={{ flexShrink: 0 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowEdit(true)}>{t("edit")}</button>
-          <button className="btn btn-ghost btn-sm" onClick={handleDeploy}>{t("deployConfig")}</button>
-          <button className="btn btn-ghost btn-sm" onClick={handleDrainRedeploy}>{t("drainRedeploy")}</button>
-          <button className="btn btn-ghost btn-sm" onClick={handleRestart}>{t("restartAgent")}</button>
-        </div>
+        {isAdmin && (
+          <div className="btn-group" style={{ flexShrink: 0 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowEdit(true)}>{t("edit")}</button>
+            <button className="btn btn-ghost btn-sm" onClick={handleDeploy}>{t("deployConfig")}</button>
+            <button className="btn btn-ghost btn-sm" onClick={handleDrainRedeploy}>{t("drainRedeploy")}</button>
+            <button className="btn btn-ghost btn-sm" onClick={handleRestart}>{t("restartAgent")}</button>
+          </div>
+        )}
       </div>
 
       {actionMsg && <div className="alert alert-info" style={{ marginBottom: 16 }}>{actionMsg}</div>}
@@ -353,6 +356,7 @@ function EditSiteModal({ site, onClose, onSave }) {
     </div>
   )
 }
+
 
 
 
