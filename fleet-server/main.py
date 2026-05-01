@@ -188,7 +188,7 @@ def require_viewer(user: "User" = Depends(_get_current_user)) -> "User":
     # Any authenticated user can view
     return user
 MEDIAMTX_YAML = os.environ.get("MEDIAMTX_YAML", "/app/mediamtx.yml")
-MEDIAMTX_API  = os.environ.get("MEDIAMTX_API",  "http://localhost:9997")
+MEDIAMTX_API  = os.environ.get("MEDIAMTX_API",  "http://host.docker.internal:9997")
 PUBLIC_HOST   = os.environ.get("PUBLIC_HOST",    "localhost")
 RTSP_PORT     = os.environ.get("RTSP_PORT",      "8554")
 TLS_CERT_DIR = os.environ.get("TLS_CERT_DIR", "/app/tls")
@@ -2565,7 +2565,7 @@ def _ensure_mtx_toolkit_node() -> Optional[int]:
     try:
         payload = _mtx_toolkit_request("/api/fleet/nodes?active_only=false")
     except Exception as exc:
-        logger.info("MTX Toolkit node bootstrap skipped: %s", exc)
+        logger.warning("MTX Toolkit node bootstrap skipped: %s", exc)
         return None
 
     nodes = payload.get("nodes", []) if isinstance(payload, dict) else []
@@ -2594,7 +2594,7 @@ def _ensure_mtx_toolkit_node() -> Optional[int]:
     try:
         created = _mtx_toolkit_request("/api/fleet/nodes", method="POST", data=node_data)
     except Exception as exc:
-        logger.info("MTX Toolkit node creation skipped: %s", exc)
+        logger.warning("MTX Toolkit node creation skipped: %s", exc)
         return None
     if isinstance(created, dict) and created.get("id"):
         return int(created["id"])
@@ -2728,3 +2728,4 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
