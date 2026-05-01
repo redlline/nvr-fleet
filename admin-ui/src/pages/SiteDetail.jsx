@@ -174,10 +174,10 @@ export default function SiteDetail({ siteId, navigate }) {
 
       <div className="tabs">
         {[
-          { id: "cameras", label: "Cameras" },
-          { id: "streams", label: "Streams" },
-          { id: "archive", label: "Archive" },
-          { id: "traffic", label: "Traffic" },
+          { id: "cameras", label: t("cameras") },
+          { id: "streams", label: t("streams") },
+          { id: "archive", label: t("archive") },
+          { id: "traffic", label: t("traffic") },
         ].map((item) => (
           <button
             key={item.id}
@@ -194,8 +194,8 @@ export default function SiteDetail({ siteId, navigate }) {
       {tab === "archive" && <ArchiveTab siteId={siteId} publicHost={window.location.hostname} />}
       {tab === "traffic" && (
         <div>
-          <TrafficChart siteId={siteId} hours={1} title="Traffic - last 1 hour" />
-          <TrafficChart siteId={siteId} hours={24} title="Traffic - last 24 hours" />
+          <TrafficChart siteId={siteId} hours={1} title="{t("trafficLast1h")}" />
+          <TrafficChart siteId={siteId} hours={24} title="{t("trafficLast24h")}" />
         </div>
       )}
 
@@ -353,5 +353,6 @@ function EditSiteModal({ site, onClose, onSave }) {
     </div>
   )
 }
+
 
 
