@@ -1,24 +1,14 @@
 [Unit]
 Description=NVR Fleet Agent
-Documentation=https://github.com/redlline/NVR-Fleet
-After=network-online.target
+After=network-online.target go2rtc.service
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/nvr-fleet-agent
-# Load environment variables from .env file
-EnvironmentFile=/opt/nvr-fleet-agent/.env
+EnvironmentFile=/etc/nvr-fleet-agent.env
 ExecStart=/opt/nvr-fleet-agent/.venv/bin/python /opt/nvr-fleet-agent/agent.py
 Restart=always
-RestartSec=5
-StartLimitInterval=0
-StartLimitBurst=999999
-
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=nvr-fleet-agent
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
