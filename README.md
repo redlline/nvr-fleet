@@ -145,6 +145,8 @@ docker exec mtx-toolkit-frontend sh -c \
 docker compose -f docker-compose.mtx-toolkit.yml restart mtx-toolkit-frontend
 ```
 
+
+> `.htpasswd` хранится в памяти контейнера — пересоздаётся после `docker compose down`. Пароль берётся из переменных окружения. Автоматическое создание через `entrypoint.sh` монтируется через volume.
 ---
 
 ## Брендинг и локализация
@@ -275,3 +277,4 @@ python agent.py
 ---
 
 *Проект активно развивается. Issues и PR приветствуются.*
+
