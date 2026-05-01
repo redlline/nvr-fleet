@@ -2236,14 +2236,17 @@ async def run_agent():
                     await close_all_tcp_tunnels()
         except asyncio.CancelledError:
             raise
-        except (websockets.ConnectionClosed, OSError) as exc:
+        except (websockets.ConnectionClosed, OSError, ConnectionRefusedError,
+                websockets.InvalidURI, websockets.InvalidHandshake) as exc:
             log.warning("Disconnected: %s. Reconnecting in %ss", exc, reconnect_delay)
             await close_all_tcp_tunnels()
             await asyncio.sleep(reconnect_delay)
             reconnect_delay = min(reconnect_delay * 2, 60)
         except Exception as exc:
-            log.error("Unexpected agent error: %s", exc)
+            log.error("Unexpected agent error: %s. Reconnecting in %ss", exc, reconnect_delay)
+            await close_all_tcp_tunnels()
             await asyncio.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, 60)
 
 
 async def run_local_admin():
@@ -2317,3 +2320,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
