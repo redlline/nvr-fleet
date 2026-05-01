@@ -306,7 +306,7 @@ export default function System() {
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => restartServices(null, "the whole stack")} disabled={stackBusy || !stack?.docker_available}>
-            {stackBusy ? <><span className="spinner" /> Working...</> : "Restart full stack"}
+            {stackBusy ? <><span className="spinner" /> Working...</> : t("restartFull")}
           </button>
           <button className="btn btn-ghost btn-sm" onClick={() => restartServices(["nginx", "admin-ui", "fleet-server"], "web services")} disabled={stackBusy || !stack?.docker_available}>
             Restart web layer
@@ -389,7 +389,7 @@ export default function System() {
 
       <Section title="Backups">
         <div className="alert alert-info">
-          Export includes sites, cameras, agent tokens and TLS files. Import replaces the current configuration and redeploys the restored sites.
+          {t("backupDesc")}
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
@@ -407,7 +407,7 @@ export default function System() {
         </div>
 
         <div style={{ color: "var(--text2)", fontSize: 12, marginBottom: 10 }}>
-          Server backup directory: <code>{backupList.directory || "-"}</code>
+          {t("backupDir")}: <code>{backupList.directory || "-"}</code>
         </div>
 
         <div className="table-wrap">
@@ -436,7 +436,7 @@ export default function System() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="4" style={{ color: "var(--text2)" }}>No rotated backups on server yet.</td>
+                  <td colSpan="4" style={{ color: "var(--text2)" }}>{t("noBackups")}</td>
                 </tr>
               )}
             </tbody>
@@ -488,6 +488,7 @@ function formatBytes(bytes) {
   }
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }
+
 
 
 
