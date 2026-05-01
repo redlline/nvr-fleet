@@ -5,7 +5,8 @@ import { t } from "../lib/i18n"
 const ROLES = ["admin", "operator", "viewer"]
 const ROLE_COLORS = { admin: "badge-red", operator: "badge-amber", viewer: "badge-green" }
 
-export default function UsersPage() {
+export default function UsersPage({ role = "viewer" }) {
+  const isAdmin = role === "admin"
   const [users, setUsers]     = useState([])
   const [editing, setEditing] = useState(null)  // null | "new" | user object
   const [form, setForm]       = useState({ username: "", password: "", role: "viewer", is_active: true })
@@ -56,7 +57,7 @@ export default function UsersPage() {
           <div className="page-title">{t("usersTitle")}</div>
           <div className="page-sub">{t("usersSub")}</div>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={openNew}>+ {t("addUser")}</button>
+        {isAdmin && <button className="btn btn-primary btn-sm" onClick={openNew}>+ {t("addUser")}</button>}
       </div>
 
       {/* Role legend */}
@@ -146,9 +147,9 @@ export default function UsersPage() {
                   </span>
                 </td>
                 <td style={{ display: "flex", gap: 8 }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => openEdit(u)}>{t("editUser")}</button>
-                  <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)" }}
-                    onClick={() => remove(u)}>{t("deleteUser")}</button>
+                  {isAdmin && <button className="btn btn-ghost btn-sm" onClick={() => openEdit(u)}>{t("editUser")}</button>}
+                  {isAdmin && <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)" }}
+                    onClick={() => remove(u)}>{t("deleteUser")}</button>}
                 </td>
               </tr>
             ))}
@@ -158,3 +159,4 @@ export default function UsersPage() {
     </div>
   )
 }
+
