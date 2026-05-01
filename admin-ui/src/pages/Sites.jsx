@@ -23,7 +23,8 @@ function formatNvrCell(site) {
   )
 }
 
-export default function Sites({ navigate }) {
+export default function Sites({ navigate, role = "viewer" }) {
+  const isAdmin = role === "admin"
   const [sites, setSites] = useState([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
@@ -69,7 +70,7 @@ export default function Sites({ navigate }) {
           <div className="page-title">{t("sites")}</div>
           <div className="page-sub">{t("sitesSub")}</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>{t("addSite")}</button>
+        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>{t("addSite")}</button>}
       </div>
 
       {installInfo && (
@@ -345,6 +346,7 @@ function AddSiteModal({ onClose, onSave }) {
     </div>
   )
 }
+
 
 
 
