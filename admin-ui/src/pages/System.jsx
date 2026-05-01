@@ -306,7 +306,7 @@ export default function System() {
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => restartServices(null, "the whole stack")} disabled={stackBusy || !stack?.docker_available}>
-            {stackBusy ? <><span className="spinner" /> Working...</> : t("restartFull")}
+            {stackBusy ? <><span className="spinner" /> {t("working")}</> : t("restartFull")}
           </button>
           <button className="btn btn-ghost btn-sm" onClick={() => restartServices(["nginx", "admin-ui", "fleet-server"], "web services")} disabled={stackBusy || !stack?.docker_available}>
             Restart web layer
@@ -387,22 +387,22 @@ export default function System() {
         </pre>
       </Section>
 
-      <Section title="Backups">
+      <Section title={t("backups")}>
         <div className="alert alert-info">
           {t("backupDesc")}
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
           <button className="btn btn-primary btn-sm" onClick={exportBackup} disabled={backupBusy}>
-            {backupBusy ? <><span className="spinner" /> Working...</> : "Export backup"}
+            {backupBusy ? <><span className="spinner" /> {t("working")}</> : t("exportBackup")}
           </button>
           <input className="form-input" style={{ maxWidth: 120 }} type="number" min="1" max="100" value={backupKeep} onChange={(e) => setBackupKeep(e.target.value)} />
           <button className="btn btn-ghost btn-sm" onClick={rotateBackup} disabled={backupBusy}>
-            Rotate backup on server
+            {t("rotateBackup")}
           </button>
           <input className="form-input" style={{ maxWidth: 360 }} type="file" accept=".zip" onChange={(e) => setBackupFile(e.target.files?.[0] || null)} />
           <button className="btn btn-ghost btn-sm" onClick={importBackup} disabled={backupBusy || !backupFile}>
-            Import backup
+            {t("importBackup")}
           </button>
         </div>
 
@@ -414,9 +414,9 @@ export default function System() {
           <table>
             <thead>
               <tr>
-                <th>Filename</th>
-                <th>Created</th>
-                <th>Size</th>
+                <th>{t("filename")}</th>
+                <th>{t("created")}</th>
+                <th>{t("size")}</th>
                 <th></th>
               </tr>
             </thead>
@@ -429,7 +429,7 @@ export default function System() {
                     <td>{formatBytes(item.size_bytes)}</td>
                     <td>
                       <button className="btn btn-ghost btn-sm" onClick={() => downloadRotatedBackup(item.filename)} disabled={backupBusy}>
-                        Download
+                        {t("download")}
                       </button>
                     </td>
                   </tr>
@@ -488,6 +488,7 @@ function formatBytes(bytes) {
   }
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }
+
 
 
 
