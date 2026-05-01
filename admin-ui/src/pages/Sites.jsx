@@ -67,7 +67,7 @@ export default function Sites({ navigate }) {
       <div className="page-header">
         <div>
           <div className="page-title">{t("sites")}</div>
-          <div className="page-sub">Create the site first, then finish NVR setup from the mini-PC in LAN.</div>
+          <div className="page-sub">{t("sitesSub")}</div>
         </div>
         <button className="btn btn-primary" onClick={() => setShowAdd(true)}>{t("addSite")}</button>
       </div>
@@ -116,7 +116,7 @@ export default function Sites({ navigate }) {
             </thead>
             <tbody>
               {sites.length === 0 && (
-                <tr><td colSpan={10} className="empty-state">{t("noSitesYet")}. Add the first draft site and finish setup from the mini-PC.</td></tr>
+                <tr><td colSpan={10} className="empty-state">{t("noSitesYet")}</td></tr>
               )}
               {sites.map((site) => (
                 <tr key={site.id}>
@@ -150,7 +150,7 @@ export default function Sites({ navigate }) {
                         disabled={deleting === site.id}
                         onClick={() => handleDelete(site)}
                       >
-                        {deleting === site.id ? <span className="spinner" /> : "Delete"}
+                        {deleting === site.id ? <span className="spinner" /> : t("delete")}
                       </button>
                     </div>
                   </td>
@@ -345,4 +345,5 @@ function AddSiteModal({ onClose, onSave }) {
     </div>
   )
 }
+
 
