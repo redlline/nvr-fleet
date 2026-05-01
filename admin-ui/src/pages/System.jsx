@@ -241,7 +241,7 @@ export default function System() {
         </div>
       </div>
 
-      <Section title="Certificate">
+      <Section title={t("certificate")}>
         {cert ? (
           <div className="form-row">
             <Info label="Subject" value={cert.subject} />
@@ -297,7 +297,7 @@ export default function System() {
         </form>
       </Section>
 
-      <Section title="Stack">
+      <Section title={t("stack")}>
         {!stack?.docker_available && (
           <div className="alert alert-error" style={{ marginBottom: 16 }}>
             Docker control is unavailable: {stack?.docker_message || "unknown reason"}
@@ -348,7 +348,7 @@ export default function System() {
         </div>
       </Section>
 
-      <Section title="Logs">
+      <Section title={t("logs")}>
         <div className="form-row" style={{ alignItems: "end" }}>
           <div className="form-group">
             <label className="form-label">{t("service")}</label>
@@ -488,6 +488,7 @@ function formatBytes(bytes) {
   }
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }
+
 
 
 
