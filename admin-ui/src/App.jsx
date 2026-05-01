@@ -117,7 +117,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState)
   }, [])
 
-  if (!authed) return <Login onLogin={() => { setAuthed(true); fetchRole() }} brandName={BRAND.name} />
+  if (!authed) return <Login onLogin={() => { setAuthed(true); fetchRole() }} brand={BRAND} />
 
   function navigate(nextPage, site = null, extra = {}) {
     const nextRoute = {
@@ -231,6 +231,7 @@ function Sidebar({ page, navigate, brand }) {
     </nav>
   )
 }
+
 
 
 
