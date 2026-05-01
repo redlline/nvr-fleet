@@ -106,6 +106,13 @@ const translations = {
     restartWeb: "Restart web layer",
     restartMedia: "Restart media layer",
     noLogsYet: "No logs loaded yet.",
+    trafficLast1h: "Traffic - last 1 hour",
+    trafficLast24h: "Traffic - last 24 hours",
+    apiPort: "API port",
+    controlPort: "Control port",
+    channels: "Channels",
+    working: "Working...",
+    download: "Download",
     // NetworkMap
     networkMap: "Network Map",
     networkMapSub: "Geographic overview of all sites",
@@ -246,6 +253,13 @@ const translations = {
     restartWeb: "Перезапустить веб-слой",
     restartMedia: "Перезапустить медиа-слой",
     noLogsYet: "Логи ещё не загружены.",
+    trafficLast1h: "Трафик - последний час",
+    trafficLast24h: "Трафик - последние 24 часа",
+    apiPort: "API порт",
+    controlPort: "Порт управления",
+    channels: "Каналы",
+    working: "Работаю...",
+    download: "Скачать",
     // NetworkMap
     networkMap: "Карта сети",
     networkMapSub: "Географический обзор всех площадок",
@@ -387,6 +401,13 @@ const translations = {
     restartWeb: "Web gatlagyny täzele",
     restartMedia: "Media gatlagyny täzele",
     noLogsYet: "Loglar heniz ýüklenmedik.",
+    trafficLast1h: "Traffik - soňky 1 sagat",
+    trafficLast24h: "Traffik - soňky 24 sagat",
+    apiPort: "API porty",
+    controlPort: "Dolandyryş porty",
+    channels: "Kanallar",
+    working: "Işleýär...",
+    download: "Ýükle",
     // NetworkMap
     networkMap: "Tor kartasy",
     networkMapSub: "Ähli meýdançalaryň geografiki syn",
@@ -448,5 +469,6 @@ export const LANGS = [
   { code: "ru", label: "RU" },
   { code: "tk", label: "TK" },
 ]
+
 
 
