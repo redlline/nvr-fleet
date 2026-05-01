@@ -57,6 +57,12 @@ const translations = {
     loginUsername: "Username",
     loginPassword: "Password",
     loginButton: "Sign in",
+    loginSubtitle: "Sign in to continue",
+    loginWithUser: "Sign in with username / password",
+    loginLegacy: "Use admin token instead",
+    adminToken: "Admin token",
+    invalidCredentials: "Invalid username or password",
+    verifying: "Verifying...",
     loginLegacy: "or enter admin token",
     dashboardSub: "System overview — auto-refresh every 15s",
     site: "Site",
@@ -233,6 +239,12 @@ const translations = {
     loginUsername: "Логин",
     loginPassword: "Пароль",
     loginButton: "Войти",
+    loginSubtitle: "Войдите для продолжения",
+    loginWithUser: "Войти с логином / паролем",
+    loginLegacy: "Использовать токен администратора",
+    adminToken: "Токен администратора",
+    invalidCredentials: "Неверный логин или пароль",
+    verifying: "Проверка...",
     loginLegacy: "или введите токен администратора",
     dashboardSub: "Обзор системы — обновление каждые 15 сек",
     site: "Площадка",
@@ -410,6 +422,12 @@ const translations = {
     loginUsername: "Ulanyjy ady",
     loginPassword: "Açar söz",
     loginButton: "Gir",
+    loginSubtitle: "Dowam etmek üçin giriň",
+    loginWithUser: "Ulanyjy ady / açar söz bilen giriň",
+    loginLegacy: "Admin tokenini ulanyň",
+    adminToken: "Admin tokeni",
+    invalidCredentials: "Ulanyjy ady ýa-da açar söz ýalňyş",
+    verifying: "Barlanýar...",
     loginLegacy: "ýa-da admin tokenini giriziň",
     dashboardSub: "Ulgam syn — 15 sekuntda bir täzelen",
     site: "Meýdança",
@@ -556,6 +574,7 @@ export const LANGS = [
   { code: "ru", label: "RU" },
   { code: "tk", label: "TK" },
 ]
+
 
 
 
