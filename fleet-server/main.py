@@ -2669,6 +2669,8 @@ def create_user(data: dict, db: Session = Depends(get_db), _=Depends(require_adm
     role     = data.get("role", "viewer")
     if not username or not password:
         raise HTTPException(400, "username and password are required")
+    if len(password.encode()) > 72:
+        raise HTTPException(400, "Password must be 72 bytes or fewer (bcrypt limit)")
     if role not in ("admin", "operator", "viewer"):
         raise HTTPException(400, "role must be admin, operator, or viewer")
     if db.query(User).filter_by(username=username).first():
@@ -2694,6 +2696,8 @@ def update_user(user_id: int, data: dict, db: Session = Depends(get_db), _=Depen
     if "role" in data and data["role"] in ("admin", "operator", "viewer"):
         u.role = data["role"]
     if "password" in data and data["password"]:
+        if len(data["password"].encode()) > 72:
+            raise HTTPException(400, "Password must be 72 bytes or fewer (bcrypt limit)")
         u.password_hash = _hash_password(data["password"])
     if "is_active" in data:
         u.is_active = bool(data["is_active"])
@@ -2713,6 +2717,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 
