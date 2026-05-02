@@ -1,6 +1,11 @@
 import asyncio
 import base64
 import hashlib
+try:
+    import bcrypt as _bcrypt
+    _BCRYPT_AVAILABLE = True
+except ImportError:
+    _BCRYPT_AVAILABLE = False
 import io
 import json
 import logging
@@ -100,23 +105,51 @@ app.add_middleware(
 
 security = HTTPBearer(auto_error=False)
 
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin-secret-change-me")
-JWT_SECRET  = os.environ.get("JWT_SECRET", ADMIN_TOKEN)
+_raw_admin_token = os.environ.get("ADMIN_TOKEN", "")
+if not _raw_admin_token:
+    # Generate a random token on startup if not set — still insecure to rely on,
+    # but prevents the well-known default from being used in production.
+    import secrets as _secrets_mod
+    _raw_admin_token = _secrets_mod.token_hex(32)
+    import logging as _log_tmp
+    _log_tmp.getLogger(__name__).warning(
+        "ADMIN_TOKEN not set in environment — generated ephemeral token. "
+        "Set ADMIN_TOKEN in your .env for a stable value."
+    )
+ADMIN_TOKEN = _raw_admin_token
+# JWT_SECRET must be independent of ADMIN_TOKEN
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+if not JWT_SECRET:
+    import secrets as _secrets_mod2
+    JWT_SECRET = _secrets_mod2.token_hex(32)
+    import logging as _log_tmp2
+    _log_tmp2.getLogger(__name__).warning(
+        "JWT_SECRET not set in environment — generated ephemeral secret. "
+        "All sessions will be invalidated on restart. Set JWT_SECRET in .env."
+    )
 JWT_ALGO    = "HS256"
 JWT_EXPIRE_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "24"))
 
 
 def _hash_password(password: str) -> str:
-    import hashlib, os as _os
-    salt = _os.urandom(16).hex()
+    """Hash password using bcrypt when available, SHA-256 as legacy fallback."""
+    if _BCRYPT_AVAILABLE:
+        return "bcrypt:" + _bcrypt.hashpw(password.encode(), _bcrypt.gensalt(rounds=12)).decode()
+    salt = secrets.token_hex(16)
     h = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-    return f"{salt}:{h}"
+    return f"sha256:{salt}:{h}"
 
 
 def _verify_password(password: str, password_hash: str) -> bool:
-    import hashlib
+    """Verify password — supports bcrypt and legacy SHA-256 hashes."""
     try:
-        salt, h = password_hash.split(":", 1)
+        if password_hash.startswith("bcrypt:"):
+            stored = password_hash[len("bcrypt:"):]
+            return _bcrypt.checkpw(password.encode(), stored.encode())
+        if password_hash.startswith("sha256:"):
+            _, salt, h = password_hash.split(":", 2)
+        else:
+            salt, h = password_hash.split(":", 1)
         return hashlib.sha256(f"{salt}{password}".encode()).hexdigest() == h
     except Exception:
         return False
@@ -151,15 +184,8 @@ def _get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> "User":
-    # Legacy: ADMIN_TOKEN still works as super-admin
-    if creds and creds.credentials == ADMIN_TOKEN:
-        # Return a virtual admin user
-        u = User()
-        u.id = 0
-        u.username = "admin"
-        u.role = "admin"
-        u.allowed_sites = "[]"
-        return u
+    # Legacy ADMIN_TOKEN bearer path removed — use /api/auth/login with username+password.
+    # ADMIN_TOKEN is now reserved for agent authentication only.
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
@@ -785,6 +811,10 @@ def _resolve_backup_file(filename: str) -> Path:
 def _load_backup_archive(raw_bytes: bytes) -> tuple[dict, Optional[str], Optional[str]]:
     try:
         with zipfile.ZipFile(io.BytesIO(raw_bytes), "r") as archive:
+            # Zip traversal protection: reject any entry with absolute paths or ".."
+            for entry in archive.namelist():
+                if entry.startswith("/") or ".." in entry.split("/"):
+                    raise HTTPException(400, f"Unsafe path in backup archive: {entry!r}")
             if "backup.json" not in archive.namelist():
                 raise HTTPException(400, "Backup archive must contain backup.json")
             payload = json.loads(archive.read("backup.json").decode("utf-8"))
@@ -2652,9 +2682,7 @@ async def _mtx_toolkit_sync_loop() -> None:
 def login(data: dict, db: Session = Depends(get_db)):
     username = (data.get("username") or "").strip()
     password = data.get("password", "")
-    # Legacy: password-only login with ADMIN_TOKEN
-    if not username and password == ADMIN_TOKEN:
-        return {"token": ADMIN_TOKEN, "role": "admin", "username": "admin"}
+    # Legacy password-only login removed — always require username+password.
     user = db.query(User).filter_by(username=username, is_active=True).first()
     if not user or not _verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -2728,5 +2756,6 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
