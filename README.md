@@ -82,12 +82,17 @@ docker compose up -d
 # Скачать скрипт установки с вашего VPS
 curl -s https://nvr.yourserver.com/install.sh | bash
 
-# Или вручную
-git clone https://github.com/redlline/NVR-Fleet /opt/nvr-fleet-agent
-cd /opt/nvr-fleet-agent
+# Или вручную (без install.sh):
+mkdir -p /opt/nvr-fleet-agent && cd /opt/nvr-fleet-agent
+curl -fsSL https://nvr.yourserver.com/agent/agent.py -o agent.py
 python3 -m venv .venv
-# Agent installed via scripts/install.sh (fleet-agent/requirements.txt does not exist as a separate file;
-# dependencies are embedded in install.sh)
+.venv/bin/pip install --quiet websockets pyyaml fastapi uvicorn
+
+# Создать /etc/nvr-fleet-agent.env с переменными:
+# SITE_ID, AGENT_TOKEN, SERVER_HOST, SERVER_WS, SERVER_API
+# (generate с сервера через deploy config или вручную)
+
+.venv/bin/python agent.py
 ```
 
 ### Зависимости admin-ui (для разработки)
@@ -283,6 +288,7 @@ python fleet-agent/agent.py
 ---
 
 *Проект активно развивается. Issues и PR приветствуются.*
+
 
 
 

@@ -39,7 +39,14 @@ def mediamtx_internal_api_pass() -> str:
 
 def mediamtx_viewer_pass() -> str:
     """Read-only viewer password for RTSP/HLS access. Set MEDIAMTX_VIEWER_PASS in .env."""
-    return os.environ.get("MEDIAMTX_VIEWER_PASS", "")
+    val = os.environ.get("MEDIAMTX_VIEWER_PASS", "")
+    if not val:
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "MEDIAMTX_VIEWER_PASS is not set — generated MediaMTX config will have "
+            "an empty viewer password. Set it in .env."
+        )
+    return val
 
 
 def normalize_stream_path(stream_name: str) -> str:
@@ -173,5 +180,6 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
     Path(mediamtx_yml_path).parent.mkdir(parents=True, exist_ok=True)
     with open(mediamtx_yml_path, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+
 
 

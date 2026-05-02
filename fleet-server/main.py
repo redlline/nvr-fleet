@@ -168,6 +168,11 @@ PUBLIC_WEB_SCHEME = os.environ.get("PUBLIC_WEB_SCHEME", "").strip().lower()
 MEDIA_URL_MODE = os.environ.get("MEDIA_URL_MODE", "relative").strip().lower()
 MTX_TOOLKIT_API = os.environ.get("MTX_TOOLKIT_API", "http://host.docker.internal:5002").rstrip("/")
 MEDIAMTX_VIEWER_PASS = os.environ.get("MEDIAMTX_VIEWER_PASS", "")
+if not MEDIAMTX_VIEWER_PASS:
+    logger.warning(
+        "MEDIAMTX_VIEWER_PASS is not set — RTSP URLs and HLS basic auth will use "
+        "an empty viewer password. Set MEDIAMTX_VIEWER_PASS in .env."
+    )
 MTX_TOOLKIT_RTSP_URL = os.environ.get("MTX_TOOLKIT_RTSP_URL", f"rtsp://viewer:{MEDIAMTX_VIEWER_PASS}@host.docker.internal:{RTSP_PORT}")
 MTX_TOOLKIT_NODE_NAME = os.environ.get("MTX_TOOLKIT_NODE_NAME", f"MediaMTX {PUBLIC_HOST}")
 MTX_TOOLKIT_ENVIRONMENT = os.environ.get("MTX_TOOLKIT_ENVIRONMENT", "production")
@@ -351,7 +356,7 @@ STACK_SERVICE_SPECS = [
         "label": "MTX Toolkit UI",
         "container_name": "mtx-toolkit-frontend",
         "probe_kind": "http",
-        "probe_target": f"http://{os.environ.get('MTX_UI_USER','admin')}:{os.environ.get('MTX_UI_PASSWORD','changeme')}@host.docker.internal:3001/",
+        "probe_target": f"http://{os.environ.get('MTX_UI_USER','admin')}:{os.environ.get('MTX_UI_PASSWORD','')}@host.docker.internal:3001/",
     },
     {
         "key": "mtx-toolkit-api",
@@ -2708,6 +2713,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 

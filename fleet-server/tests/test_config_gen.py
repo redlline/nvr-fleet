@@ -50,7 +50,9 @@ class ConfigGenTests(unittest.TestCase):
 
         self.assertIn("authMethod: internal", content)
         self.assertIn("user: viewer", content)
-        self.assertIn("pass: VIEWER_PASS", content)
+        # viewer pass comes from MEDIAMTX_VIEWER_PASS env var; empty in test env
+        self.assertIn("user: viewer", content)
+        self.assertNotIn("pass: VIEWER_PASS", content)  # must not be a literal placeholder
         self.assertIn("user: siteabcd1234", content)
         self.assertIn("pass: PASS_abcd1234", content)
         self.assertIn("path: ~^siteabcd1234/.+$", content)
@@ -92,4 +94,5 @@ class StreamStatRtspTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
