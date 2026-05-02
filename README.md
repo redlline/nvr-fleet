@@ -278,11 +278,12 @@ python fleet-agent/agent.py
 | `PUBLIC_HOST` | `localhost` | Публичный домен VPS |
 | `DATABASE_URL` | SQLite | URL базы данных |
 | `MTX_UI_USER` | `admin` | Логин MTX Toolkit |
-| `MTX_UI_PASSWORD` | `changeme` | Пароль MTX Toolkit |
+| `MTX_UI_PASSWORD` | (required, no default) | Пароль MTX Toolkit (nginx basic auth на порту 3001) |
 
 ---
 
 *Проект активно развивается. Issues и PR приветствуются.*
+
 
 
 
