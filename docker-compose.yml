@@ -44,13 +44,14 @@ services:
       - "25554-25653:25554-25653"
       - "28000-28099:28000-28099"
     environment:
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-change-me-now}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
       DATABASE_URL: "sqlite:////app/data/fleet.db"
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
       RTSP_PORT: "8554"
       MEDIAMTX_API_USER: "mediamtx-internal"
-      MEDIAMTX_API_PASS: "MEDIAMTX_INTERNAL_PASS"
-      MEDIAMTX_API: "http://mediamtx-internal:MEDIAMTX_INTERNAL_PASS@host.docker.internal:9997"
+      MEDIAMTX_API_PASS: ${MEDIAMTX_INTERNAL_PASS}
+      MEDIAMTX_API: "http://mediamtx-internal:${MEDIAMTX_INTERNAL_PASS}@host.docker.internal:9997"
       MEDIAMTX_HLS_PROXY_TARGET: "http://host.docker.internal:8888"
       MEDIAMTX_YAML: "/app/mediamtx/mediamtx.yml"
       TUNNEL_HTTP_START: "20080"
