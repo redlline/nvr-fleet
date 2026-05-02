@@ -37,6 +37,11 @@ def mediamtx_internal_api_pass() -> str:
     return os.environ.get("MEDIAMTX_API_PASS", "MEDIAMTX_INTERNAL_PASS")
 
 
+def mediamtx_viewer_pass() -> str:
+    """Read-only viewer password for RTSP/HLS access. Set MEDIAMTX_VIEWER_PASS in .env."""
+    return os.environ.get("MEDIAMTX_VIEWER_PASS", "")
+
+
 def normalize_stream_path(stream_name: str) -> str:
     if stream_name.startswith("site") and "_cam" in stream_name:
         prefix, _, suffix = stream_name.partition("_")
@@ -108,7 +113,7 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
         },
         {
             "user": "viewer",
-            "pass": "VIEWER_PASS",
+            "pass": mediamtx_viewer_pass(),
             "ips": [],
             "permissions": [
                 {"action": "read"},
@@ -168,4 +173,5 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
     Path(mediamtx_yml_path).parent.mkdir(parents=True, exist_ok=True)
     with open(mediamtx_yml_path, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+
 

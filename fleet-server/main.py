@@ -1,11 +1,6 @@
 import asyncio
 import base64
 import hashlib
-try:
-    import bcrypt as _bcrypt
-    _BCRYPT_AVAILABLE = True
-except ImportError:
-    _BCRYPT_AVAILABLE = False
 import io
 import json
 import logging
@@ -54,6 +49,16 @@ from config_gen import (
     normalize_stream_path,
     public_stream_path,
     update_mediamtx_paths,
+)
+from auth import (
+    hash_password as _hash_password,
+    verify_password as _verify_password,
+    create_jwt as _create_jwt,
+    decode_jwt as _decode_jwt,
+    ADMIN_TOKEN,
+    JWT_SECRET,
+    JWT_ALGO,
+    JWT_EXPIRE_HOURS,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -105,71 +110,10 @@ app.add_middleware(
 
 security = HTTPBearer(auto_error=False)
 
-_raw_admin_token = os.environ.get("ADMIN_TOKEN", "")
-if not _raw_admin_token:
-    # Generate a random token on startup if not set — still insecure to rely on,
-    # but prevents the well-known default from being used in production.
-    import secrets as _secrets_mod
-    _raw_admin_token = _secrets_mod.token_hex(32)
-    import logging as _log_tmp
-    _log_tmp.getLogger(__name__).warning(
-        "ADMIN_TOKEN not set in environment — generated ephemeral token. "
-        "Set ADMIN_TOKEN in your .env for a stable value."
-    )
-ADMIN_TOKEN = _raw_admin_token
-# JWT_SECRET must be independent of ADMIN_TOKEN
-JWT_SECRET = os.environ.get("JWT_SECRET", "")
-if not JWT_SECRET:
-    import secrets as _secrets_mod2
-    JWT_SECRET = _secrets_mod2.token_hex(32)
-    import logging as _log_tmp2
-    _log_tmp2.getLogger(__name__).warning(
-        "JWT_SECRET not set in environment — generated ephemeral secret. "
-        "All sessions will be invalidated on restart. Set JWT_SECRET in .env."
-    )
-JWT_ALGO    = "HS256"
-JWT_EXPIRE_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "24"))
+# ADMIN_TOKEN, JWT_SECRET, JWT_ALGO, JWT_EXPIRE_HOURS are imported from auth.py
 
 
-def _hash_password(password: str) -> str:
-    """Hash password using bcrypt when available, SHA-256 as legacy fallback."""
-    if _BCRYPT_AVAILABLE:
-        return "bcrypt:" + _bcrypt.hashpw(password.encode(), _bcrypt.gensalt(rounds=12)).decode()
-    salt = secrets.token_hex(16)
-    h = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-    return f"sha256:{salt}:{h}"
-
-
-def _verify_password(password: str, password_hash: str) -> bool:
-    """Verify password — supports bcrypt and legacy SHA-256 hashes."""
-    try:
-        if password_hash.startswith("bcrypt:"):
-            stored = password_hash[len("bcrypt:"):]
-            return _bcrypt.checkpw(password.encode(), stored.encode())
-        if password_hash.startswith("sha256:"):
-            _, salt, h = password_hash.split(":", 2)
-        else:
-            salt, h = password_hash.split(":", 1)
-        return hashlib.sha256(f"{salt}{password}".encode()).hexdigest() == h
-    except Exception:
-        return False
-
-
-def _create_jwt(user_id: int, username: str, role: str) -> str:
-    import jwt as _jwt
-    from datetime import timezone
-    payload = {
-        "sub": str(user_id),
-        "username": username,
-        "role": role,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS),
-    }
-    return _jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
-
-
-def _decode_jwt(token: str) -> dict:
-    import jwt as _jwt
-    return _jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+# _hash_password, _verify_password, _create_jwt, _decode_jwt are imported from auth.py
 
 
 def get_db():
@@ -223,7 +167,8 @@ TLS_PRIVKEY_PATH = os.environ.get("TLS_PRIVKEY_PATH", os.path.join(TLS_CERT_DIR,
 PUBLIC_WEB_SCHEME = os.environ.get("PUBLIC_WEB_SCHEME", "").strip().lower()
 MEDIA_URL_MODE = os.environ.get("MEDIA_URL_MODE", "relative").strip().lower()
 MTX_TOOLKIT_API = os.environ.get("MTX_TOOLKIT_API", "http://host.docker.internal:5002").rstrip("/")
-MTX_TOOLKIT_RTSP_URL = os.environ.get("MTX_TOOLKIT_RTSP_URL", f"rtsp://viewer:VIEWER_PASS@host.docker.internal:{RTSP_PORT}")
+MEDIAMTX_VIEWER_PASS = os.environ.get("MEDIAMTX_VIEWER_PASS", "")
+MTX_TOOLKIT_RTSP_URL = os.environ.get("MTX_TOOLKIT_RTSP_URL", f"rtsp://viewer:{MEDIAMTX_VIEWER_PASS}@host.docker.internal:{RTSP_PORT}")
 MTX_TOOLKIT_NODE_NAME = os.environ.get("MTX_TOOLKIT_NODE_NAME", f"MediaMTX {PUBLIC_HOST}")
 MTX_TOOLKIT_ENVIRONMENT = os.environ.get("MTX_TOOLKIT_ENVIRONMENT", "production")
 MTX_TOOLKIT_SYNC_INTERVAL = float(os.environ.get("MTX_TOOLKIT_SYNC_INTERVAL", "60"))
@@ -2084,7 +2029,7 @@ async def start_archive_playback(
         session_id=reply["session_id"],
         stream_path=stream_path,
         vendor=reply.get("vendor", site.nvr_vendor),
-        rtsp_url=f"rtsp://viewer:VIEWER_PASS@{PUBLIC_HOST}:{RTSP_PORT}/{stream_path}",
+        rtsp_url=f"rtsp://viewer:{MEDIAMTX_VIEWER_PASS}@{PUBLIC_HOST}:{RTSP_PORT}/{stream_path}",
         hls_url=_public_hls_url(stream_path),
         webrtc_url=_public_webrtc_url(stream_path),
         expires_at=datetime.fromisoformat(reply["expires_at"]),
@@ -2422,7 +2367,8 @@ def _rebuild_mediamtx(db: Session):
 
 
 def _viewer_basic_auth() -> str:
-    token = base64.b64encode(b"viewer:VIEWER_PASS").decode("ascii")
+    creds = f"viewer:{MEDIAMTX_VIEWER_PASS}".encode()
+    token = base64.b64encode(creds).decode("ascii")
     return f"Basic {token}"
 
 
@@ -2756,6 +2702,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 

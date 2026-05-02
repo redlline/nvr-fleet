@@ -86,7 +86,8 @@ curl -s https://nvr.yourserver.com/install.sh | bash
 git clone https://github.com/redlline/NVR-Fleet /opt/nvr-fleet-agent
 cd /opt/nvr-fleet-agent
 python3 -m venv .venv
-.venv/bin/pip install -r fleet-agent/requirements.txt
+# Agent installed via scripts/install.sh (fleet-agent/requirements.txt does not exist as a separate file;
+# dependencies are embedded in install.sh)
 ```
 
 ### Зависимости admin-ui (для разработки)
@@ -94,9 +95,13 @@ python3 -m venv .venv
 ```bash
 cd admin-ui
 npm install
-npm install lucide-react   # иконки сайдбара
 npm run dev
 ```
+
+> **Windows / Node ESM note:** `npm run build` использует `--configLoader native` (Vite 8+).
+> Если сборка падает в Windows PowerShell с ESM-ошибкой, запустите напрямую:
+> `npx vite build` или используйте WSL2 / Git Bash.
+> Флаг `--configLoader native` нужен для корректной работы с `vite.config.js` в ESM-режиме.
 
 ---
 
@@ -110,7 +115,7 @@ npm run dev
 
 **Создание пользователей**: System → Users → Add user
 
-При первом запуске автоматически создаётся пользователь `admin` с паролем = `ADMIN_TOKEN` из `.env`.
+При первом запуске автоматически создаётся пользователь `admin`. Начальный пароль = значение `ADMIN_TOKEN` из `.env`. Смените через UI после первого входа.
 
 ---
 
@@ -267,8 +272,9 @@ python agent.py
 
 | Переменная | По умолчанию | Описание |
 |-----------|-------------|----------|
-| `ADMIN_TOKEN` | `admin-secret-change-me` | Токен суперадмина (legacy) |
-| `JWT_SECRET` | = ADMIN_TOKEN | Секрет для JWT пользователей |
+| `ADMIN_TOKEN` | (required, no default) | Токен аутентификации агентов. Если не задан — эфемерный с WARNING. |
+| `JWT_SECRET` | (required, no default) | Независимый секрет подписи JWT. Если не задан — эфемерный: сессии сбрасываются при рестарте. |
+| `MEDIAMTX_VIEWER_PASS` | (required) | Read-only пароль viewer для RTSP/HLS в MediaMTX. |
 | `PUBLIC_HOST` | `localhost` | Публичный домен VPS |
 | `DATABASE_URL` | SQLite | URL базы данных |
 | `MTX_UI_USER` | `admin` | Логин MTX Toolkit |
@@ -277,4 +283,5 @@ python agent.py
 ---
 
 *Проект активно развивается. Issues и PR приветствуются.*
+
 

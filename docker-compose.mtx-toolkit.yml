@@ -1,3 +1,26 @@
+# MTX Toolkit — external add-on compose file
+#
+# REQUIRED SOURCE: This compose file builds MTX Toolkit from source.
+# The source directories are NOT included in this repo.
+# Clone the MTX Toolkit project into ./addons/ before using this file:
+#
+#   git clone https://github.com/Dan-Calvert/mtx-toolkit.git addons/mtx-toolkit
+#
+# Required layout:
+#   addons/mtx-toolkit/backend/   (Flask API + Celery app)
+#   addons/mtx-toolkit/frontend/  (React/Vite frontend)
+#
+# Existing files in ./mtx-toolkit/ (entrypoint.sh, frontend.nginx.conf) are
+# runtime config mounted into the running container — they are part of this repo.
+#
+# Environment variables (add to .env):
+#   MTX_UI_USER         - username for the nginx basic auth on port 3001
+#   MTX_UI_PASSWORD     - password for the nginx basic auth on port 3001
+#   MEDIAMTX_VIEWER_PASS - read-only viewer password for MediaMTX RTSP/HLS
+#   MEDIAMTX_INTERNAL_PASS - internal API password for fleet-server <-> mediamtx
+#   PUBLIC_HOST         - public hostname (shared with main compose)
+#   PUBLIC_SCHEME       - http or https (default: https)
+
 services:
   mtx-toolkit-backend:
     build:
@@ -13,8 +36,8 @@ services:
       REDIS_URL: redis://mtx-toolkit-redis:6379/0
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
       PUBLIC_SCHEME: ${PUBLIC_SCHEME:-https}
-      MEDIAMTX_API_URL: http://mediamtx-internal:MEDIAMTX_INTERNAL_PASS@host.docker.internal:9997
-      MEDIAMTX_RTSP_URL: rtsp://viewer:VIEWER_PASS@host.docker.internal:8554
+      MEDIAMTX_API_URL: http://mediamtx-internal:${MEDIAMTX_INTERNAL_PASS}@host.docker.internal:9997
+      MEDIAMTX_RTSP_URL: rtsp://viewer:${MEDIAMTX_VIEWER_PASS}@host.docker.internal:8554
       MEDIAMTX_HLS_PORT: "8888"
       RECORDING_BASE_PATH: /recordings
     extra_hosts:
@@ -39,7 +62,7 @@ services:
       - "3001:80"
     environment:
       MTX_UI_USER: ${MTX_UI_USER:-admin}
-      MTX_UI_PASSWORD: ${MTX_UI_PASSWORD:-changeme}
+      MTX_UI_PASSWORD: ${MTX_UI_PASSWORD}
     volumes:
       - ./mtx-toolkit/frontend.nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./mtx-toolkit/entrypoint.sh:/docker-entrypoint.d/40-htpasswd.sh
@@ -83,8 +106,8 @@ services:
       REDIS_URL: redis://mtx-toolkit-redis:6379/0
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
       PUBLIC_SCHEME: ${PUBLIC_SCHEME:-https}
-      MEDIAMTX_API_URL: http://mediamtx-internal:MEDIAMTX_INTERNAL_PASS@host.docker.internal:9997
-      MEDIAMTX_RTSP_URL: rtsp://viewer:VIEWER_PASS@host.docker.internal:8554
+      MEDIAMTX_API_URL: http://mediamtx-internal:${MEDIAMTX_INTERNAL_PASS}@host.docker.internal:9997
+      MEDIAMTX_RTSP_URL: rtsp://viewer:${MEDIAMTX_VIEWER_PASS}@host.docker.internal:8554
       MEDIAMTX_HLS_PORT: "8888"
       RECORDING_BASE_PATH: /recordings
     extra_hosts:
@@ -113,7 +136,3 @@ services:
 volumes:
   mtx_toolkit_pg_data:
   mtx_toolkit_redis_data:
-
-
-
-
