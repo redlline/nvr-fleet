@@ -108,6 +108,7 @@ class StreamStatOut(BaseModel):
     stream_path: str
     ready: bool
     updated: datetime
+    rtsp_url: str | None = None  # populated by server using MEDIAMTX_VIEWER_PASS
 
 
 class TrafficOut(BaseModel):
@@ -281,3 +282,4 @@ class SiteAgentDrainResult(BaseModel):
     drained: bool
     deployed: bool
     message: str = ""
+

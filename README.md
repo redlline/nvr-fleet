@@ -251,7 +251,7 @@ SQLAlchemy-модели совместимы без изменений кода.
 ## Разработка
 
 ```bash
-# Backend
+# Backend (fleet-server/requirements.txt exists)
 cd fleet-server
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8765
@@ -259,13 +259,13 @@ uvicorn main:app --reload --port 8765
 # Frontend
 cd admin-ui
 npm install
-npm install lucide-react
 npm run dev
+# Windows / Node ESM fallback if npm run build fails: npx vite build
 
-# Агент
-cd fleet-agent
-pip install -r requirements.txt
-python agent.py
+# Агент устанавливается только через scripts/install.sh (fleet-agent/requirements.txt не существует)
+# Для локального запуска агента вручную:
+pip install websockets pyyaml fastapi uvicorn
+python fleet-agent/agent.py
 ```
 
 ### Переменные окружения (.env)
@@ -283,5 +283,6 @@ python agent.py
 ---
 
 *Проект активно развивается. Issues и PR приветствуются.*
+
 
 

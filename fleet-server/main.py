@@ -1767,7 +1767,13 @@ async def replace_agent_cameras(
 def get_stream_stats(site_id: str, db: Session = Depends(get_db), _=Depends(require_viewer)):
     _ensure_site_exists(site_id, db)
     stats = db.query(StreamStat).filter_by(site_id=site_id).all()
-    return [StreamStatOut.model_validate(s) for s in stats]
+    results = []
+    for s in stats:
+        out = StreamStatOut.model_validate(s)
+        # Populate rtsp_url server-side so UI never needs to hardcode viewer credentials
+        out.rtsp_url = f"rtsp://viewer:{MEDIAMTX_VIEWER_PASS}@{PUBLIC_HOST}:{RTSP_PORT}/{s.stream_path}"
+        results.append(out)
+    return results
 
 
 @app.get("/api/sites/{site_id}/traffic")
@@ -2702,6 +2708,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 

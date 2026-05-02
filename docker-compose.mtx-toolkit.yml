@@ -1,25 +1,29 @@
 # MTX Toolkit — external add-on compose file
 #
-# REQUIRED SOURCE: This compose file builds MTX Toolkit from source.
-# The source directories are NOT included in this repo.
-# Clone the MTX Toolkit project into ./addons/ before using this file:
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  SOURCE TREES REQUIRED — NOT INCLUDED IN THIS REPO                     ║
+# ║                                                                         ║
+# ║  This file builds MTX Toolkit (https://github.com/Dan-Calvert/mtx-toolkit)║
+# ║  which must be cloned separately:                                       ║
+# ║                                                                         ║
+# ║    git clone https://github.com/Dan-Calvert/mtx-toolkit addons/mtx-toolkit ║
+# ║                                                                         ║
+# ║  Expected layout after clone:                                           ║
+# ║    addons/mtx-toolkit/backend/   (Flask API + Celery)                  ║
+# ║    addons/mtx-toolkit/frontend/  (React/Vite UI)                       ║
+# ║                                                                         ║
+# ║  Runtime config (./mtx-toolkit/ in THIS repo) is already present.      ║
+# ║  Running this compose file without the addons/ clone will fail at       ║
+# ║  docker compose build with: "context ./addons/mtx-toolkit/... not found"║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 #
-#   git clone https://github.com/Dan-Calvert/mtx-toolkit.git addons/mtx-toolkit
-#
-# Required layout:
-#   addons/mtx-toolkit/backend/   (Flask API + Celery app)
-#   addons/mtx-toolkit/frontend/  (React/Vite frontend)
-#
-# Existing files in ./mtx-toolkit/ (entrypoint.sh, frontend.nginx.conf) are
-# runtime config mounted into the running container — they are part of this repo.
-#
-# Environment variables (add to .env):
-#   MTX_UI_USER         - username for the nginx basic auth on port 3001
-#   MTX_UI_PASSWORD     - password for the nginx basic auth on port 3001
-#   MEDIAMTX_VIEWER_PASS - read-only viewer password for MediaMTX RTSP/HLS
-#   MEDIAMTX_INTERNAL_PASS - internal API password for fleet-server <-> mediamtx
-#   PUBLIC_HOST         - public hostname (shared with main compose)
-#   PUBLIC_SCHEME       - http or https (default: https)
+# Environment variables required in .env:
+#   MTX_UI_USER             — username for nginx basic auth on port 3001
+#   MTX_UI_PASSWORD         — password for nginx basic auth
+#   MEDIAMTX_VIEWER_PASS    — read-only viewer password for MediaMTX RTSP/HLS
+#   MEDIAMTX_INTERNAL_PASS  — internal API password (fleet-server ↔ mediamtx)
+#   PUBLIC_HOST             — public hostname (shared with main compose)
+#   PUBLIC_SCHEME           — http or https (default: https)
 
 services:
   mtx-toolkit-backend:

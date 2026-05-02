@@ -38,6 +38,7 @@ export default function StreamsTab({ siteId, publicHost }) {
       path,
       ready: streamStat?.ready ?? false,
       updated: streamStat?.updated,
+      streamStat,
     }
   })
 
@@ -69,8 +70,9 @@ export default function StreamsTab({ siteId, publicHost }) {
             {rows.length === 0 && (
               <tr><td colSpan={7} className="empty-state">No enabled cameras</td></tr>
             )}
-            {rows.map(({ camera, path, ready, updated }) => {
-              const rtsp = `rtsp://viewer:VIEWER_PASS@${publicHost}:8554/${path}`
+            {rows.map(({ camera, path, ready, updated, streamStat }) => {
+              // rtsp_url comes from the server — it knows the real viewer credentials
+              const rtsp = streamStat?.rtsp_url ?? null
               const hls = `/hls/${path}/index.m3u8`
               const watchUrl = `/?page=watch&site=${encodeURIComponent(siteId)}&watch=${encodeURIComponent(path)}&label=${encodeURIComponent(camera.name || `Cam ${camera.channel}`)}`
 
@@ -90,7 +92,7 @@ export default function StreamsTab({ siteId, publicHost }) {
                     <code style={{ fontSize: 11 }}>{path}</code>
                   </td>
                   <td>
-                    <CopyField value={rtsp} label="RTSP" />
+                    {rtsp ? <CopyField value={rtsp} label="RTSP" /> : <span style={{color:"var(--text2)",fontSize:11}}>—</span>}
                   </td>
                   <td>
                     <CopyField value={hls} label="HLS" />
@@ -139,3 +141,4 @@ function CopyField({ value, label }) {
     </button>
   )
 }
+
