@@ -1,25 +1,30 @@
 #!/usr/bin/env bash
 # NVR Fleet Agent installer
 # Usage: curl -fsSL http(s)://SERVER/install.sh | bash -s -- --site SITE_ID --token TOKEN --server HOST --scheme http|https
+#
+# Safe for re-runs: existing /etc/nvr-fleet-agent.env is preserved on upgrade.
+# Pass --force-env to overwrite it with new SITE_ID/TOKEN values.
 set -euo pipefail
 
 SITE_ID=""
 TOKEN=""
 SERVER=""
 SCHEME="https"
+FORCE_ENV=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --site)   SITE_ID="$2"; shift 2 ;;
-    --token)  TOKEN="$2";   shift 2 ;;
-    --server) SERVER="$2";  shift 2 ;;
-    --scheme) SCHEME="$2";  shift 2 ;;
+    --site)      SITE_ID="$2"; shift 2 ;;
+    --token)     TOKEN="$2";   shift 2 ;;
+    --server)    SERVER="$2";  shift 2 ;;
+    --scheme)    SCHEME="$2";  shift 2 ;;
+    --force-env) FORCE_ENV=1;  shift   ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
 
 [[ -z "$SITE_ID" || -z "$TOKEN" || -z "$SERVER" ]] && {
-  echo "Usage: install.sh --site SITE_ID --token TOKEN --server HOST --scheme http|https"
+  echo "Usage: install.sh --site SITE_ID --token TOKEN --server HOST [--scheme http|https] [--force-env]"
   exit 1
 }
 [[ "$SCHEME" != "http" && "$SCHEME" != "https" ]] && {
@@ -49,6 +54,7 @@ echo
 
 AGENT_DIR="/opt/nvr-fleet-agent"
 VENV_DIR="${AGENT_DIR}/.venv"
+ENV_FILE="/etc/nvr-fleet-agent.env"
 
 # --- Dependencies ---
 apt-get update -qq
@@ -68,12 +74,20 @@ curl -fsSL "$GO2RTC_URL" -o /usr/local/bin/go2rtc
 chmod +x /usr/local/bin/go2rtc
 mkdir -p /etc/go2rtc
 
-# --- Agent ---
+# --- Agent script (always updated on install/upgrade) ---
 echo "Installing fleet-agent..."
 curl -fsSL "${SCHEME}://${SERVER}/agent/agent.py" -o "${AGENT_DIR}/agent.py"
 
-# --- Environment ---
-cat > /etc/nvr-fleet-agent.env << EOF
+# --- Environment file ---
+# Preserve existing env on upgrades — only write if missing or --force-env is set.
+if [[ -f "$ENV_FILE" && "$FORCE_ENV" -eq 0 ]]; then
+  echo "Existing ${ENV_FILE} preserved (use --force-env to overwrite)."
+else
+  if [[ -f "$ENV_FILE" && "$FORCE_ENV" -eq 1 ]]; then
+    cp "$ENV_FILE" "${ENV_FILE}.bak.$(date +%Y%m%dT%H%M%S)"
+    echo "Backed up existing ${ENV_FILE} before overwrite."
+  fi
+  cat > "$ENV_FILE" << EOF
 SITE_ID=${SITE_ID}
 AGENT_TOKEN=${TOKEN}
 SERVER_HOST=${SERVER}
@@ -87,7 +101,9 @@ FFMPEG_BIN=/usr/bin/ffmpeg
 AGENT_ADMIN_HOST=0.0.0.0
 AGENT_ADMIN_PORT=7070
 EOF
-chmod 600 /etc/nvr-fleet-agent.env
+  chmod 600 "$ENV_FILE"
+  echo "Written ${ENV_FILE}."
+fi
 
 # --- go2rtc systemd ---
 cat > /etc/systemd/system/go2rtc.service << 'EOF'
@@ -136,3 +152,5 @@ echo "Agent status: $(systemctl is-active nvr-fleet-agent)"
 echo "go2rtc status: $(systemctl is-active go2rtc)"
 echo "Check logs: journalctl -u nvr-fleet-agent -f"
 echo "Local admin: http://$(hostname -I | awk '{print $1}'):7070"
+echo
+echo "NOTE: To update credentials on reinstall, use: --force-env"
