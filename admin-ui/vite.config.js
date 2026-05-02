@@ -6,13 +6,13 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        // Split hls.js into its own chunk — it is ~500 kB and only needed
-        // on WatchPage / ArchiveTab. This eliminates the Vite chunk size warning
-        // and improves initial load time for users who never open a stream.
-        manualChunks: {
-          "hls": ["hls.js"],
-          "vendor": ["react", "react-dom"],
-          "icons": ["lucide-react"],
+        // manualChunks must be a function in Vite 8 (rolldown bundler).
+        // Splits hls.js (~500 kB) into its own chunk so it is only loaded
+        // on WatchPage / ArchiveTab, eliminating the chunk size warning.
+        manualChunks(id) {
+          if (id.includes("node_modules/hls.js")) return "hls"
+          if (id.includes("node_modules/react-dom") || id.includes("node_modules/react/")) return "vendor"
+          if (id.includes("node_modules/lucide-react")) return "icons"
         },
       },
     },
