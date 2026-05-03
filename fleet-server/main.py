@@ -304,9 +304,25 @@ def _read_tls_info() -> Optional[TlsCertificateInfo]:
 
 
 def _public_scheme() -> str:
+    """Determine public scheme.
+
+    Priority:
+    1. PUBLIC_WEB_SCHEME env var (explicit override)
+    2. TLS cert files present at TLS_FULLCHAIN_PATH / TLS_PRIVKEY_PATH
+    3. Defaults to "https" when PUBLIC_HOST is set and not localhost/127.*
+       (assumption: production deployments use HTTPS via reverse proxy)
+    4. Falls back to "http"
+    """
     if PUBLIC_WEB_SCHEME in {"http", "https"}:
         return PUBLIC_WEB_SCHEME
-    return "https" if _read_tls_info() else "http"
+    if _read_tls_info():
+        return "https"
+    # Auto-detect: if PUBLIC_HOST looks like a real domain (not localhost),
+    # default to https — nginx terminates TLS and proxies to us via HTTP.
+    host = PUBLIC_HOST.lower()
+    if host and host not in {"localhost", "127.0.0.1", "0.0.0.0"}             and not host.startswith("192.168.")             and not host.startswith("10.")             and ":" not in host:
+        return "https"
+    return "http"
 
 
 def _public_base_url() -> str:
@@ -2806,3 +2822,4 @@ app.include_router(_r_system)
 app.include_router(_r_users)
 app.include_router(_r_agent)
 app.include_router(_r_map)
+
