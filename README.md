@@ -95,20 +95,6 @@ python3 -m venv .venv
 .venv/bin/python agent.py
 ```
 
-### Зависимости admin-ui (для разработки)
-
-```bash
-cd admin-ui
-npm install
-npm run dev
-```
-
-> **Windows / Node ESM note:** `npm run build` использует `--configLoader native` (Vite 8+).
-> Если сборка падает в Windows PowerShell с ESM-ошибкой, запустите напрямую:
-> `npx vite build` или используйте WSL2 / Git Bash.
-> Флаг `--configLoader native` нужен для корректной работы с `vite.config.js` в ESM-режиме.
-
----
 
 ## Роли пользователей
 
@@ -158,22 +144,6 @@ docker compose -f docker-compose.mtx-toolkit.yml restart mtx-toolkit-frontend
 
 > `.htpasswd` хранится в памяти контейнера — пересоздаётся после `docker compose down`. Пароль берётся из переменных окружения. Автоматическое создание через `entrypoint.sh` монтируется через volume.
 ---
-
-## Брендинг и локализация
-
-### Переименование панели
-
-Редактируйте блок `BRAND` в `admin-ui/src/App.jsx`:
-
-```javascript
-const BRAND = {
-  name:      "Ваше название",     // заголовок в сайдбаре
-  logoIcon:  "/logo.png",          // путь к файлу public/logo.png
-  copyright: "© 2026 Ваша компания",
-}
-```
-
-**Кастомный логотип**: поместите файл в `admin-ui/public/logo.png` и укажите `"/logo.png"` в `logoIcon`.
 
 ### Языки интерфейса
 
@@ -252,26 +222,6 @@ SQLAlchemy-модели совместимы без изменений кода.
 | MediaMTX per instance | ~200–300 RTSP путей при 4 Мбит/с каждый |
 
 ---
-
-## Разработка
-
-```bash
-# Backend (fleet-server/requirements.txt exists)
-cd fleet-server
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8765
-
-# Frontend
-cd admin-ui
-npm install
-npm run dev
-# Windows / Node ESM fallback if npm run build fails: npx vite build
-
-# Агент устанавливается только через scripts/install.sh (fleet-agent/requirements.txt не существует)
-# Для локального запуска агента вручную:
-pip install websockets pyyaml fastapi uvicorn
-python fleet-agent/agent.py
-```
 
 ### Переменные окружения (.env)
 
