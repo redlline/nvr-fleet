@@ -355,6 +355,8 @@ STACK_SERVICE_SPECS = [
         "key": "mtx-toolkit-ui",
         "label": "MTX Toolkit UI",
         "container_name": "mtx-toolkit-frontend",
+        "compose_service": "mtx-toolkit-frontend",
+        "host_port": 3001,
         "probe_kind": "http",
         "probe_target": f"http://{os.environ.get('MTX_UI_USER','admin')}:{os.environ.get('MTX_UI_PASSWORD','')}@host.docker.internal:3001/",
     },
@@ -362,6 +364,8 @@ STACK_SERVICE_SPECS = [
         "key": "mtx-toolkit-api",
         "label": "MTX Toolkit API",
         "container_name": "mtx-toolkit-backend",
+        "compose_service": "mtx-toolkit-backend",
+        "host_port": 5002,
         "probe_kind": "http",
         "probe_target": "http://host.docker.internal:5002/api/health/",
     },
@@ -369,6 +373,7 @@ STACK_SERVICE_SPECS = [
         "key": "mtx-toolkit-worker",
         "label": "MTX Toolkit Worker",
         "container_name": "mtx-toolkit-celery-worker",
+        "compose_service": "mtx-toolkit-celery-worker",
         "probe_kind": "none",
         "probe_target": "",
     },
@@ -376,6 +381,7 @@ STACK_SERVICE_SPECS = [
         "key": "mtx-toolkit-beat",
         "label": "MTX Toolkit Beat",
         "container_name": "mtx-toolkit-celery-beat",
+        "compose_service": "mtx-toolkit-celery-beat",
         "probe_kind": "none",
         "probe_target": "",
     },
@@ -383,6 +389,8 @@ STACK_SERVICE_SPECS = [
         "key": "mtx-toolkit-postgres",
         "label": "MTX Toolkit Postgres",
         "container_name": "mtx-toolkit-postgres",
+        "compose_service": "mtx-toolkit-postgres",
+        "host_port": 15433,
         "probe_kind": "tcp",
         "probe_target": ("host.docker.internal", 15433),
     },
@@ -390,6 +398,8 @@ STACK_SERVICE_SPECS = [
         "key": "mtx-toolkit-redis",
         "label": "MTX Toolkit Redis",
         "container_name": "mtx-toolkit-redis",
+        "compose_service": "mtx-toolkit-redis",
+        "host_port": 6380,
         "probe_kind": "tcp",
         "probe_target": ("host.docker.internal", 6380),
     },
@@ -490,6 +500,43 @@ def _probe_service(spec: dict) -> tuple[Optional[bool], str]:
     return None, ""
 
 
+def _published_host_ports(container) -> set[int]:
+    ports = set()
+    try:
+        bindings = container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
+        for published in bindings.values():
+            if not published:
+                continue
+            for item in published:
+                host_port = item.get("HostPort")
+                if host_port:
+                    ports.add(int(host_port))
+    except Exception:
+        return set()
+    return ports
+
+
+def _find_container_for_spec(containers: dict, spec: dict):
+    container = containers.get(spec["container_name"])
+    if container is not None:
+        return container
+
+    compose_service = spec.get("compose_service")
+    if compose_service:
+        for item in containers.values():
+            labels = item.attrs.get("Config", {}).get("Labels", {}) or {}
+            if labels.get("com.docker.compose.service") == compose_service:
+                return item
+
+    host_port = spec.get("host_port")
+    if host_port:
+        for item in containers.values():
+            if host_port in _published_host_ports(item):
+                return item
+
+    return None
+
+
 def _stack_status_payload() -> StackStatus:
     client, docker_message = _load_docker_client()
     docker_available = client is not None
@@ -509,12 +556,25 @@ def _stack_status_payload() -> StackStatus:
         probe_ok, probe_message = _probe_service(spec)
         status_text = "unknown"
         health_text = "unknown"
+        container_name = spec["container_name"]
+        restart_supported = docker_available
         if docker_available:
-            container = containers.get(spec["container_name"])
+            container = _find_container_for_spec(containers, spec)
             if container is None:
-                status_text = "missing"
-                health_text = "missing"
+                if probe_ok is True:
+                    status_text = "external"
+                    health_text = "reachable"
+                    restart_supported = False
+                elif probe_ok is False:
+                    status_text = "missing"
+                    health_text = "missing"
+                    restart_supported = False
+                else:
+                    status_text = "missing"
+                    health_text = "missing"
+                    restart_supported = False
             else:
+                container_name = container.name
                 attrs = container.attrs.get("State", {})
                 status_text = attrs.get("Status", "unknown")
                 health_text = attrs.get("Health", {}).get("Status", "unknown")
@@ -536,12 +596,12 @@ def _stack_status_payload() -> StackStatus:
         services.append(StackServiceStatus(
             key=spec["key"],
             label=spec["label"],
-            container_name=spec["container_name"],
+            container_name=container_name,
             status=status_text,
             health=health_text,
             probe_ok=probe_ok,
             probe_message=probe_message,
-            restart_supported=docker_available,
+            restart_supported=restart_supported,
         ))
 
     return StackStatus(

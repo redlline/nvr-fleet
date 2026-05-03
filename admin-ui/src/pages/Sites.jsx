@@ -28,6 +28,7 @@ export default function Sites({ navigate, role = "viewer" }) {
   const [sites, setSites] = useState([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const [editingSite, setEditingSite] = useState(null)
   const [installInfo, setInstallInfo] = useState(null)
   const [deleting, setDeleting] = useState(null)
 
@@ -61,6 +62,13 @@ export default function Sites({ navigate, role = "viewer" }) {
     } finally {
       setDeleting(null)
     }
+  }
+
+  async function handleSaveEdit(formData) {
+    if (!editingSite) return
+    await api.updateSite(editingSite.id, formData)
+    setEditingSite(null)
+    load()
   }
 
   return (
@@ -145,7 +153,7 @@ export default function Sites({ navigate, role = "viewer" }) {
                   </td>
                   <td>
                     <div className="btn-group">
-                      <button className="btn btn-ghost btn-sm" onClick={() => navigate("site", site.id)}>{t("edit")}</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setEditingSite(site)}>{t("edit")}</button>
                       <button
                         className="btn btn-danger btn-sm"
                         disabled={deleting === site.id}
@@ -163,6 +171,7 @@ export default function Sites({ navigate, role = "viewer" }) {
       )}
 
       {showAdd && <AddSiteModal onClose={() => setShowAdd(false)} onSave={handleAdd} />}
+      {editingSite && <EditSiteModal site={editingSite} onClose={() => setEditingSite(null)} onSave={handleSaveEdit} />}
     </div>
   )
 }
@@ -339,6 +348,160 @@ function AddSiteModal({ onClose, onSave }) {
             <button type="button" className="btn btn-ghost" onClick={onClose}>{t("cancel")}</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? <><span className="spinner" /> Creating...</> : "Create site"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function EditSiteModal({ site, onClose, onSave }) {
+  const [form, setForm] = useState({
+    name: site.name,
+    city: site.city || "",
+    lat: site.lat ?? "",
+    lon: site.lon ?? "",
+    nvr_vendor: site.nvr_vendor || "hikvision",
+    nvr_ip: site.nvr_ip || "",
+    nvr_http_port: site.nvr_http_port ?? 80,
+    nvr_control_port: site.nvr_control_port ?? defaultControlPort(site.nvr_vendor),
+    nvr_user: site.nvr_user || "admin",
+    nvr_pass: "",
+    nvr_port: site.nvr_port ?? 554,
+    stream_type: site.stream_type || "main",
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  function upd(key, value) {
+    setForm((prev) => {
+      const next = { ...prev, [key]: value }
+      if (key === "nvr_vendor") {
+        next.nvr_control_port = defaultControlPort(value)
+      }
+      return next
+    })
+  }
+
+  async function submit(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError("")
+    try {
+      const payload = {
+        ...form,
+        lat: form.lat === "" ? 0 : parseFloat(form.lat) || 0,
+        lon: form.lon === "" ? 0 : parseFloat(form.lon) || 0,
+        nvr_http_port: parseInt(form.nvr_http_port, 10) || 80,
+        nvr_control_port: parseInt(form.nvr_control_port, 10) || defaultControlPort(form.nvr_vendor),
+        nvr_port: parseInt(form.nvr_port, 10) || 554,
+      }
+      if (!payload.nvr_pass) delete payload.nvr_pass
+      await onSave(payload)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-title">{t("editSite")} - {site.name}</div>
+        {error && <div className="alert alert-error">{error}</div>}
+        <form onSubmit={submit}>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">{t("name")}</label>
+              <input className="form-input" value={form.name} onChange={(e) => upd("name", e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">{t("city")}</label>
+              <input className="form-input" value={form.city} onChange={(e) => upd("city", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">{t("latitude")}</label>
+              <input className="form-input" type="number" step="any" value={form.lat} onChange={(e) => upd("lat", e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">{t("longitude")}</label>
+              <input className="form-input" type="number" step="any" value={form.lon} onChange={(e) => upd("lon", e.target.value)} />
+            </div>
+          </div>
+          <div style={{ color: "var(--text2)", fontSize: 12, marginTop: -8, marginBottom: 14 }}>
+            {t("coordsHint")}
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">{t("archiveAdapter")}</label>
+              <select className="form-input" value={form.nvr_vendor} onChange={(e) => upd("nvr_vendor", e.target.value)}>
+                {VENDOR_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">{t("defaultStream")}</label>
+              <select className="form-input" value={form.stream_type} onChange={(e) => upd("stream_type", e.target.value)}>
+                <option value="main">{t("mainStream")}</option>
+                <option value="sub">{t("subStream")}</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="alert alert-info" style={{ marginBottom: 16 }}>
+            {t("nvrIpHint")}
+          </div>
+
+          <div className="form-row-3">
+            <div className="form-group" style={{ gridColumn: "1/3" }}>
+              <label className="form-label">{t("nvrIp")}</label>
+              <input className="form-input" value={form.nvr_ip} onChange={(e) => upd("nvr_ip", e.target.value)} placeholder="Leave blank for local setup flow" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">RTSP port</label>
+              <input className="form-input" type="number" value={form.nvr_port} onChange={(e) => upd("nvr_port", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">NVR API port</label>
+              <input className="form-input" type="number" value={form.nvr_http_port} onChange={(e) => upd("nvr_http_port", e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">NVR control port</label>
+              <input className="form-input" type="number" value={form.nvr_control_port} onChange={(e) => upd("nvr_control_port", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">{t("nvrUsername")}</label>
+              <input className="form-input" value={form.nvr_user} onChange={(e) => upd("nvr_user", e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">NVR password (leave blank to keep)</label>
+              <input
+                className="form-input"
+                type="password"
+                value={form.nvr_pass}
+                onChange={(e) => upd("nvr_pass", e.target.value)}
+                placeholder="********"
+              />
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>{t("cancel")}</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? <><span className="spinner" /> Saving...</> : "Save changes"}
             </button>
           </div>
         </form>
