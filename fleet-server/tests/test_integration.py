@@ -219,5 +219,34 @@ class AuthEndpointTests(unittest.TestCase):
         self.assertEqual(r.status_code, 413)
 
 
+    def test_realtime_traffic_returns_structure(self):
+        """GET /api/traffic/realtime must return rx_bps and tx_bps fields."""
+        headers = self._auth_header("admin", "adminpass123")
+        r = self.client.get("/api/traffic/realtime", headers=headers)
+        # Endpoint connects to MediaMTX; in test env it returns zeros but structure is valid
+        self.assertIn(r.status_code, [200])
+        data = r.json()
+        self.assertIn("rx_bps", data)
+        self.assertIn("tx_bps", data)
+        self.assertIsInstance(data["rx_bps"], int)
+        self.assertIsInstance(data["tx_bps"], int)
+
+    def test_dashboard_returns_structure(self):
+        """GET /api/dashboard must return summary counters."""
+        headers = self._auth_header("admin", "adminpass123")
+        r = self.client.get("/api/dashboard", headers=headers)
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        for key in ("total_sites", "online_agents", "offline_agents",
+                    "total_cameras", "live_streams"):
+            self.assertIn(key, data, f"missing key: {key}")
+
+    def test_map_returns_list(self):
+        """GET /api/map must return a list."""
+        headers = self._auth_header("viewer1", "viewerpass123")
+        r = self.client.get("/api/map", headers=headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertIsInstance(r.json(), list)
+
 if __name__ == "__main__":
     unittest.main()

@@ -1256,7 +1256,7 @@ async def _sync_tunnel_listeners(db: Session) -> None:
     await tunnel_manager.sync(sites)
 
 
-@app.on_event("startup")
+@app.on_event("startup")  # noqa: deprecated — migrate to lifespan when FastAPI>=0.100
 async def startup_event() -> None:
     asyncio.create_task(_mtx_metrics_poll_loop())
     if MTX_TOOLKIT_SYNC_ENABLED:
@@ -2007,6 +2007,11 @@ def get_traffic_realtime(_=Depends(require_viewer)):
         total_rx_bps += rx_bps
         total_tx_bps += tx_bps
 
+    # Update _mtx_last_poll so subsequent calls compute correct delta
+    _mtx_last_poll.update({p: {"rx": rx_bytes.get(p, 0), "tx": tx_bytes.get(p, 0)}
+                            for p in set(list(rx_bytes.keys()) + list(tx_bytes.keys()))})
+    _mtx_last_poll["__ts__"] = now_ts
+
     return {"rx_bps": total_rx_bps, "tx_bps": total_tx_bps, "streams": streams}
 
 
@@ -2677,9 +2682,8 @@ def _check_login_rate_limit(client_ip: str) -> None:
     Periodically purges stale entries to prevent unbounded memory growth
     under DDoS with many unique source IPs.
     """
-    import time as _time
     global _login_last_cleanup
-    now = _time.time()
+    now = time.time()
 
     # Periodic cleanup: remove IPs whose last attempt is older than the window
     if now - _login_last_cleanup > _LOGIN_CLEANUP_INTERVAL:
@@ -2789,6 +2793,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 
