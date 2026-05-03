@@ -52,9 +52,24 @@ function writeRoute(nextPage, selectedSite = null, watchPath = "", watchLabel = 
   window.history.pushState({}, "", url.toString())
 }
 
+function decodeRoleFromToken(token) {
+  if (!token) return "viewer"
+  try {
+    const [, payload] = token.split(".")
+    if (!payload) return "viewer"
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/")
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4)
+    const json = JSON.parse(window.atob(padded))
+    return json?.role || "viewer"
+  } catch {
+    return "viewer"
+  }
+}
+
 export default function App() {
   const [authed, setAuthed] = useState(!!api.getToken())
   const [route, setRoute] = useState(() => readRoute())
+  const [role, setRole] = useState(() => decodeRoleFromToken(api.getToken()))
   const [, forceUpdate] = useState(0)
 
   useEffect(() => {
@@ -69,7 +84,28 @@ export default function App() {
     }
   }, [])
 
-  if (!authed) return <Login onLogin={() => setAuthed(true)} brand={BRAND} />
+  useEffect(() => {
+    if (!authed) {
+      setRole("viewer")
+      return
+    }
+
+    const tokenRole = decodeRoleFromToken(api.getToken())
+    setRole(tokenRole)
+
+    api.getMe()
+      .then((me) => {
+        if (me?.role) setRole(me.role)
+      })
+      .catch(() => {
+        setRole(tokenRole)
+      })
+  }, [authed])
+
+  if (!authed) return <Login onLogin={() => {
+    setRole(decodeRoleFromToken(api.getToken()))
+    setAuthed(true)
+  }} brand={BRAND} />
 
   function navigate(nextPage, site = null, extra = {}) {
     const nextRoute = { page: nextPage, selectedSite: site, watchPath: extra.watchPath || "", watchLabel: extra.watchLabel || "" }
@@ -79,11 +115,11 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar page={route.page} navigate={navigate} brand={BRAND} />
+      <Sidebar page={route.page} navigate={navigate} brand={BRAND} role={role} />
       <main className="content">
         {route.page === "dashboard" && <Dashboard navigate={navigate} />}
-        {route.page === "sites"     && <Sites navigate={navigate} />}
-        {route.page === "site"      && route.selectedSite && <SiteDetail siteId={route.selectedSite} navigate={navigate} />}
+        {route.page === "sites"     && <Sites navigate={navigate} role={role} />}
+        {route.page === "site"      && route.selectedSite && <SiteDetail siteId={route.selectedSite} navigate={navigate} role={role} />}
         {route.page === "watch"     && route.watchPath && (
           <WatchPage siteId={route.selectedSite} streamPath={route.watchPath} streamLabel={route.watchLabel} navigate={navigate} />
         )}
@@ -96,7 +132,7 @@ export default function App() {
   )
 }
 
-function Sidebar({ page, navigate, brand }) {
+function Sidebar({ page, navigate, brand, role }) {
   const links = [
     { id: "dashboard", icon: <LayoutDashboard size={16} />, label: t("dashboard") },
     { id: "sites",     icon: <MapPin size={16} />,          label: t("sites") },
@@ -104,7 +140,7 @@ function Sidebar({ page, navigate, brand }) {
     { id: "traffic",   icon: <BarChart2 size={16} />,       label: t("traffic") },
     { id: "system",    icon: <Settings size={16} />,        label: t("system") },
     { id: "users",     icon: <Users size={16} />,           label: t("users") },
-  ]
+  ].filter((link) => role === "admin" || link.id !== "users")
 
   return (
     <nav className="sidebar">
