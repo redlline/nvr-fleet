@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Request, status, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Request, status, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -102,6 +102,17 @@ def _ensure_db_schema() -> None:
 _ensure_db_schema()
 
 app = FastAPI(title="NVR Fleet Server", version="1.0.0", lifespan=lifespan)
+
+# ── Route groups (APIRouter) ─────────────────────────────────────────────────
+# Each router groups related endpoints. Routes are registered via include_router
+# at module load time. This structure prepares for future file-level separation.
+_r_sites    = APIRouter(tags=["sites"])
+_r_cameras  = APIRouter(tags=["cameras"])
+_r_traffic  = APIRouter(tags=["traffic"])
+_r_system   = APIRouter(tags=["system"])
+_r_users    = APIRouter(tags=["users"])
+_r_agent    = APIRouter(tags=["agent"])
+_r_map      = APIRouter(tags=["map"])
 
 # Build CORS origin list from PUBLIC_HOST.
 # Falls back to ["*"] only if PUBLIC_HOST is unset (dev/test environments).
@@ -1459,7 +1470,7 @@ def list_sites(db: Session = Depends(get_db), user=Depends(require_viewer)):
 
 
 @app.post("/api/sites", response_model=InstallResponse)
-async def create_site(data: SiteCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+async def create_site(data: SiteCreate, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     payload = _normalize_site_patch(data.model_dump())
     if not payload["name"]:
         raise HTTPException(422, "Site name is required")
@@ -1526,7 +1537,7 @@ def get_site(site_id: str, db: Session = Depends(get_db), user=Depends(require_v
 
 
 @app.put("/api/sites/{site_id}", response_model=SiteOut)
-async def update_site(site_id: str, data: SiteUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
+async def update_site(site_id: str, data: SiteUpdate, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     site = _ensure_site_exists(site_id, db)
     payload = _normalize_site_patch(data.model_dump(exclude_none=True))
     if "name" in payload and not payload["name"]:
@@ -1543,7 +1554,7 @@ async def update_site(site_id: str, data: SiteUpdate, db: Session = Depends(get_
 
 
 @app.delete("/api/sites/{site_id}")
-async def delete_site(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+async def delete_site(site_id: str, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     site = db.query(Site).filter_by(id=site_id).first()
     if not site:
         raise HTTPException(404)
@@ -1603,7 +1614,7 @@ def list_cameras(site_id: str, db: Session = Depends(get_db), user=Depends(requi
 
 
 @app.post("/api/sites/{site_id}/cameras", response_model=CameraOut)
-async def add_camera(site_id: str, data: CameraCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+async def add_camera(site_id: str, data: CameraCreate, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     _ensure_site_exists(site_id, db)
     _ensure_unique_camera_channel(db, site_id, data.channel)
     cam = Camera(
@@ -1625,7 +1636,7 @@ async def add_camera(site_id: str, data: CameraCreate, db: Session = Depends(get
 
 @app.put("/api/sites/{site_id}/cameras/{cam_id}", response_model=CameraOut)
 async def update_camera(site_id: str, cam_id: int, data: CameraUpdate,
-                        db: Session = Depends(get_db), _=Depends(require_admin)):
+                        db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     cam = db.query(Camera).filter_by(id=cam_id, site_id=site_id).first()
     if not cam:
         raise HTTPException(404)
@@ -1644,7 +1655,7 @@ async def update_camera(site_id: str, cam_id: int, data: CameraUpdate,
 
 
 @app.delete("/api/sites/{site_id}/cameras/{cam_id}")
-async def delete_camera(site_id: str, cam_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+async def delete_camera(site_id: str, cam_id: int, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     cam = db.query(Camera).filter_by(id=cam_id, site_id=site_id).first()
     if not cam:
         raise HTTPException(404)
@@ -1656,7 +1667,7 @@ async def delete_camera(site_id: str, cam_id: int, db: Session = Depends(get_db)
 
 @app.post("/api/sites/{site_id}/cameras/bulk")
 async def bulk_update_cameras(site_id: str, cameras: list[CameraUpdate],
-                               db: Session = Depends(get_db), _=Depends(require_admin)):
+                               db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     """Batch enable/disable/rename cameras"""
     _ensure_site_exists(site_id, db)
     existing = {
@@ -1740,7 +1751,7 @@ def _replace_site_cameras(site: Site, items: list[AgentCameraSyncItem], db: Sess
 
 
 @app.get("/api/agent/sites/{site_id}/bundle")
-def get_agent_bundle(site_id: str, _=Depends(require_agent_site), db: Session = Depends(get_db)):
+def get_agent_bundle(site_id: str, _site: str = Depends(require_agent_site), db: Session = Depends(get_db)):
     site = _ensure_site_exists(site_id, db)
     cameras = db.query(Camera).filter_by(site_id=site.id).order_by(Camera.channel).all()
     return {
@@ -1759,7 +1770,7 @@ def get_agent_bundle(site_id: str, _=Depends(require_agent_site), db: Session = 
 async def update_agent_site_config(
     site_id: str,
     data: AgentSiteConfigUpdate,
-    _=Depends(require_agent_site),
+    _site: str = Depends(require_agent_site),
     db: Session = Depends(get_db),
 ):
     site = _ensure_site_exists(site_id, db)
@@ -1780,7 +1791,7 @@ async def update_agent_site_config(
 async def replace_agent_cameras(
     site_id: str,
     items: list[AgentCameraSyncItem],
-    _=Depends(require_agent_site),
+    _site: str = Depends(require_agent_site),
     db: Session = Depends(get_db),
 ):
     site = _ensure_site_exists(site_id, db)
@@ -1822,7 +1833,7 @@ def get_traffic(site_id: str, hours: int = 1, db: Session = Depends(get_db), use
 
 
 @app.get("/api/traffic/total")
-def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_viewer)):
+def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _user: "User" = Depends(require_viewer)):
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     samples = (db.query(TrafficSample)
                .filter(TrafficSample.ts >= since)
@@ -1833,14 +1844,14 @@ def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(
 
 
 @app.get("/api/sites/{site_id}/traffic/mtx")
-def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_viewer)):
+def get_site_traffic_mtx(site_id: str, hours: int = 1, db: Session = Depends(get_db), _user: "User" = Depends(require_viewer)):
     """Traffic from MediaMTX metrics API (per site)."""
     samples = _parse_mtx_metrics(site_id, hours)
     return samples
 
 
 @app.get("/api/traffic/total/mtx")
-def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_viewer)):
+def get_total_traffic_mtx(hours: int = 24, db: Session = Depends(get_db), _user: "User" = Depends(require_viewer)):
     """Traffic from MediaMTX metrics API (all sites)."""
     samples = _parse_mtx_metrics(None, hours)
     return samples
@@ -1963,7 +1974,7 @@ async def _mtx_metrics_poll_loop():
 
 
 @app.get("/api/traffic/realtime")
-def get_traffic_realtime(_=Depends(require_viewer)):
+def get_traffic_realtime(_user: "User" = Depends(require_viewer)):
     """Real-time traffic: latest MTX metrics sample (rx/tx bytes per second)."""
     try:
         resp = requests.get(
@@ -2021,7 +2032,7 @@ async def list_archive(
     end: Optional[datetime] = None,
     limit: int = 200,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _user: "User" = Depends(require_admin),
 ):
     site = _ensure_site_exists(site_id, db)
     cameras = db.query(Camera).filter_by(site_id=site_id).order_by(Camera.channel).all()
@@ -2049,7 +2060,7 @@ async def start_archive_playback(
     site_id: str,
     data: ArchivePlaybackRequest,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _user: "User" = Depends(require_admin),
 ):
     site = _ensure_site_exists(site_id, db)
     camera = _get_site_camera(db, site_id, data.camera_id)
@@ -2080,7 +2091,7 @@ async def stop_archive_playback(
     site_id: str,
     session_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _user: "User" = Depends(require_admin),
 ):
     site = _ensure_site_exists(site_id, db)
     await call_agent(site_id, {
@@ -2092,12 +2103,12 @@ async def stop_archive_playback(
 
 
 @app.get("/api/system/tls", response_model=TlsStatus)
-def get_tls_status(_=Depends(require_admin)):
+def get_tls_status(_user: "User" = Depends(require_admin)):
     return _tls_status_payload()
 
 
 @app.put("/api/system/tls", response_model=TlsStatus)
-def update_tls_certificates(data: TlsUpdateRequest, _=Depends(require_admin)):
+def update_tls_certificates(data: TlsUpdateRequest, _user: "User" = Depends(require_admin)):
     fullchain_pem = data.fullchain_pem.strip()
     privkey_pem = data.privkey_pem.strip()
     if "BEGIN CERTIFICATE" not in fullchain_pem:
@@ -2112,7 +2123,7 @@ def update_tls_certificates(data: TlsUpdateRequest, _=Depends(require_admin)):
 
 
 @app.delete("/api/system/tls", response_model=TlsStatus)
-def delete_tls_certificates(_=Depends(require_admin)):
+def delete_tls_certificates(_user: "User" = Depends(require_admin)):
     for path in (TLS_FULLCHAIN_PATH, TLS_PRIVKEY_PATH):
         try:
             os.remove(path)
@@ -2122,12 +2133,12 @@ def delete_tls_certificates(_=Depends(require_admin)):
 
 
 @app.get("/api/system/stack", response_model=StackStatus)
-def get_stack_status(_=Depends(require_admin)):
+def get_stack_status(_user: "User" = Depends(require_admin)):
     return _stack_status_payload()
 
 
 @app.get("/api/system/stack/logs", response_model=StackLogsOut)
-def get_stack_logs(service: str, tail: int = 200, _=Depends(require_admin)):
+def get_stack_logs(service: str, tail: int = 200, _user: "User" = Depends(require_admin)):
     return _stack_logs_payload(service, tail)
 
 
@@ -2135,7 +2146,7 @@ def get_stack_logs(service: str, tail: int = 200, _=Depends(require_admin)):
 def restart_stack_services(
     data: StackRestartRequest,
     background_tasks: BackgroundTasks,
-    _=Depends(require_admin),
+    _user: "User" = Depends(require_admin),
 ):
     requested = data.services or [item["key"] for item in STACK_SERVICE_SPECS]
     unknown = [key for key in requested if key not in STACK_SERVICE_BY_KEY]
@@ -2161,7 +2172,7 @@ def restart_stack_services(
 
 
 @app.get("/api/system/backup/export")
-def export_backup(db: Session = Depends(get_db), _=Depends(require_admin)):
+def export_backup(db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     payload = _backup_zip_bytes(db)
     filename = f"nvr-fleet-backup-{timestamp}.zip"
@@ -2170,7 +2181,7 @@ def export_backup(db: Session = Depends(get_db), _=Depends(require_admin)):
 
 
 @app.get("/api/system/backup/list", response_model=BackupListOut)
-def list_rotated_backups(_=Depends(require_admin)):
+def list_rotated_backups(_user: "User" = Depends(require_admin)):
     return BackupListOut(
         directory=BACKUP_ROTATE_DIR,
         keep=_normalized_backup_keep(),
@@ -2179,7 +2190,7 @@ def list_rotated_backups(_=Depends(require_admin)):
 
 
 @app.post("/api/system/backup/rotate", response_model=BackupRotateResult)
-def rotate_backup(data: Optional[BackupRotateRequest] = None, db: Session = Depends(get_db), _=Depends(require_admin)):
+def rotate_backup(data: Optional[BackupRotateRequest] = None, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     keep = data.keep if data else None
     created, removed, keep_count = _write_rotated_backup(db, keep)
     return BackupRotateResult(
@@ -2191,7 +2202,7 @@ def rotate_backup(data: Optional[BackupRotateRequest] = None, db: Session = Depe
 
 
 @app.get("/api/system/backup/files/{filename}")
-def download_rotated_backup(filename: str, _=Depends(require_admin)):
+def download_rotated_backup(filename: str, _user: "User" = Depends(require_admin)):
     path = _resolve_backup_file(filename)
     return FileResponse(path, media_type="application/zip", filename=path.name)
 
@@ -2200,7 +2211,7 @@ def download_rotated_backup(filename: str, _=Depends(require_admin)):
 async def import_backup(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _user: "User" = Depends(require_admin),
 ):
     MAX_BACKUP_SIZE = 50 * 1024 * 1024  # 50 MB
     raw_bytes = await file.read(MAX_BACKUP_SIZE + 1)
@@ -2244,7 +2255,7 @@ async def import_backup(
 
 
 @app.get("/api/dashboard")
-def dashboard(db: Session = Depends(get_db), _=Depends(require_viewer)):
+def dashboard(db: Session = Depends(get_db), _user: "User" = Depends(require_viewer)):
     total_sites    = db.query(Site).count()
     total_cameras  = db.query(Camera).count()
     online_agents  = db.query(Agent).filter_by(online=True).count()
@@ -2266,21 +2277,21 @@ def dashboard(db: Session = Depends(get_db), _=Depends(require_viewer)):
 # ─── Agent control ────────────────────────────────────────────────────────────
 
 @app.post("/api/sites/{site_id}/deploy")
-async def deploy_config(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+async def deploy_config(site_id: str, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     _ensure_site_exists(site_id, db)
     sent = await _deploy_config(site_id, db)
     return {"sent": sent}
 
 
 @app.post("/api/sites/{site_id}/restart")
-async def restart_agent(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+async def restart_agent(site_id: str, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     _ensure_site_exists(site_id, db)
     sent = await send_to_agent(site_id, {"action": "restart"})
     return {"sent": sent}
 
 
 @app.post("/api/sites/{site_id}/drain-redeploy", response_model=SiteAgentDrainResult)
-async def drain_redeploy_site(site_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+async def drain_redeploy_site(site_id: str, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     _ensure_site_exists(site_id, db)
     await call_agent(site_id, {"action": "drain"}, timeout=30)
     deployed = await _deploy_config(site_id, db)
@@ -2295,7 +2306,7 @@ async def drain_redeploy_site(site_id: str, db: Session = Depends(get_db), _=Dep
 # ─── Map ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/map")
-def get_map_data(db: Session = Depends(get_db), _=Depends(require_viewer)):
+def get_map_data(db: Session = Depends(get_db), _user: "User" = Depends(require_viewer)):
     sites = db.query(Site).all()
     result = []
     for s in sites:
@@ -2716,7 +2727,7 @@ def get_me(user=Depends(_get_current_user)):
 
 
 @app.get("/api/users")
-def list_users(db: Session = Depends(get_db), _=Depends(require_admin)):
+def list_users(db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     users = db.query(User).all()
     return [{"id": u.id, "username": u.username, "role": u.role,
              "is_active": u.is_active, "allowed_sites": u.allowed_sites,
@@ -2725,7 +2736,7 @@ def list_users(db: Session = Depends(get_db), _=Depends(require_admin)):
 
 
 @app.post("/api/users")
-def create_user(data: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_user(data: dict, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     username = (data.get("username") or "").strip()
     password = data.get("password", "")
     role     = data.get("role", "viewer")
@@ -2754,7 +2765,7 @@ def create_user(data: dict, db: Session = Depends(get_db), _=Depends(require_adm
 
 
 @app.put("/api/users/{user_id}")
-def update_user(user_id: int, data: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_user(user_id: int, data: dict, db: Session = Depends(get_db), _user: "User" = Depends(require_admin)):
     u = db.query(User).filter_by(id=user_id).first()
     if not u:
         raise HTTPException(404, "User not found")
@@ -2787,14 +2798,11 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.commit()
     return {"status": "deleted"}
 
-
-
-
-
-
-
-
-
-
-
-
+# ── Register route groups ────────────────────────────────────────────────────
+app.include_router(_r_sites)
+app.include_router(_r_cameras)
+app.include_router(_r_traffic)
+app.include_router(_r_system)
+app.include_router(_r_users)
+app.include_router(_r_agent)
+app.include_router(_r_map)

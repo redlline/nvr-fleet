@@ -2077,7 +2077,125 @@ _VALID_SERVER_ACTIONS = {
 }
 
 
+# ── Per-action handlers ──────────────────────────────────────────────────────
+
+async def _handle_update_config(ws, msg: dict, request_id: str | None) -> None:
+    yaml_content = msg.get("go2rtc_yaml", "")
+    if msg.get("site") and msg.get("cameras") is not None:
+        await asyncio.to_thread(
+            _cache_bundle_payload,
+            {"site": msg["site"], "cameras": msg["cameras"]},
+        )
+        yaml_content = await asyncio.to_thread(build_go2rtc_yaml, msg["site"], msg["cameras"])
+    write_config(yaml_content)
+    restart_go2rtc()
+    await asyncio.sleep(2)
+    sync_publishers()
+    await ws_send(ws, {"type": "stream_status", "streams": publisher_status()})
+    if request_id:
+        await send_reply(ws, request_id, ok=True)
+
+
+async def _handle_restart(ws, msg: dict, request_id: str | None) -> None:
+    restart_go2rtc()
+    await asyncio.sleep(2)
+    sync_publishers()
+    cleanup_archive_sessions()
+    if request_id:
+        await send_reply(ws, request_id, ok=True)
+
+
+async def _handle_drain(ws, msg: dict, request_id: str | None) -> None:
+    for stream_name in list(_ffmpeg_procs):
+        stop_publisher(stream_name)
+    for session_id in list(_archive_sessions):
+        stop_archive_session(session_id)
+    await close_all_tcp_tunnels()
+    await ws_send(ws, {"type": "stream_status", "streams": publisher_status()})
+    if request_id:
+        await send_reply(ws, request_id, ok=True)
+
+
+async def _handle_shutdown(ws, msg: dict, request_id: str | None) -> None:
+    for stream_name in list(_ffmpeg_procs):
+        stop_publisher(stream_name)
+    for session_id in list(_archive_sessions):
+        stop_archive_session(session_id)
+    await close_all_tcp_tunnels()
+    sys.exit(0)
+
+
+async def _handle_get_status(ws, msg: dict, request_id: str | None) -> None:
+    await ws_send(ws, {"type": "stream_status", "streams": publisher_status()})
+    if request_id:
+        await send_reply(ws, request_id, ok=True)
+
+
+async def _handle_archive_list(ws, msg: dict, request_id: str | None) -> None:
+    items = await asyncio.to_thread(
+        list_archive_items,
+        msg["site"], msg["cameras"], msg.get("camera_id"),
+        parse_server_time(msg["start"]),
+        parse_server_time(msg["end"]),
+        int(msg.get("limit", 200)),
+    )
+    await send_reply(ws, request_id, ok=True, items=items)
+
+
+async def _handle_archive_start_playback(ws, msg: dict, request_id: str | None) -> None:
+    session = await asyncio.to_thread(
+        start_archive_session,
+        msg["site"], msg["camera"],
+        parse_server_time(msg["start"]),
+        parse_server_time(msg["end"]),
+    )
+    await send_reply(ws, request_id, ok=True,
+                     session_id=session["session_id"],
+                     stream_path=session["stream_path"],
+                     vendor=session["vendor"],
+                     expires_at=iso_utc(session["expires_at"]))
+
+
+async def _handle_archive_stop_playback(ws, msg: dict, request_id: str | None) -> None:
+    stopped = stop_archive_session(msg["session_id"])
+    await send_reply(ws, request_id, ok=True, stopped=stopped)
+
+
+async def _handle_tcp_open(ws, msg: dict, request_id: str | None) -> None:
+    await open_tcp_tunnel(ws, msg["connection_id"], msg["target_host"], int(msg["target_port"]))
+    await send_reply(ws, request_id, ok=True)
+
+
+async def _handle_tcp_data(ws, msg: dict, request_id: str | None) -> None:
+    await write_tcp_tunnel(msg["connection_id"], msg["data"])
+
+
+async def _handle_tcp_close(ws, msg: dict, request_id: str | None) -> None:
+    await close_tcp_tunnel(msg["connection_id"])
+
+
+# Dispatch table: action → handler function
+_ACTION_HANDLERS: dict[str, any] = {
+    "update_config":          _handle_update_config,
+    "restart":                _handle_restart,
+    "drain":                  _handle_drain,
+    "shutdown":               _handle_shutdown,
+    "get_status":             _handle_get_status,
+    "archive_list":           _handle_archive_list,
+    "archive_start_playback": _handle_archive_start_playback,
+    "archive_stop_playback":  _handle_archive_stop_playback,
+    "tcp_open":               _handle_tcp_open,
+    "tcp_data":               _handle_tcp_data,
+    "tcp_close":              _handle_tcp_close,
+}
+
+
 async def handle_message(ws: websockets.WebSocketClientProtocol, msg: dict):
+    """Dispatch incoming server messages to per-action handlers.
+
+    Validates message structure, checks action allowlist, then delegates
+    to the appropriate handler from _ACTION_HANDLERS dispatch table.
+    """
     if not isinstance(msg, dict):
         log.warning("Ignored non-dict message from server")
         return
@@ -2093,110 +2211,14 @@ async def handle_message(ws: websockets.WebSocketClientProtocol, msg: dict):
         return
 
     request_id = msg.get("request_id")
-    try:
-        if action == "update_config":
-            yaml_content = msg.get("go2rtc_yaml", "")
-            if msg.get("site") and msg.get("cameras") is not None:
-                await asyncio.to_thread(
-                    _cache_bundle_payload,
-                    {"site": msg["site"], "cameras": msg["cameras"]},
-                )
-                yaml_content = await asyncio.to_thread(build_go2rtc_yaml, msg["site"], msg["cameras"])
-            write_config(yaml_content)
-            restart_go2rtc()
-            await asyncio.sleep(2)
-            sync_publishers()
-            await ws_send(ws, {"type": "stream_status", "streams": publisher_status()})
-            if request_id:
-                await send_reply(ws, request_id, ok=True)
-            return
-
-        if action == "restart":
-            restart_go2rtc()
-            await asyncio.sleep(2)
-            sync_publishers()
-            cleanup_archive_sessions()
-            if request_id:
-                await send_reply(ws, request_id, ok=True)
-            return
-
-        if action == "drain":
-            for stream_name in list(_ffmpeg_procs):
-                stop_publisher(stream_name)
-            for session_id in list(_archive_sessions):
-                stop_archive_session(session_id)
-            await close_all_tcp_tunnels()
-            await ws_send(ws, {"type": "stream_status", "streams": publisher_status()})
-            if request_id:
-                await send_reply(ws, request_id, ok=True)
-            return
-
-        if action == "shutdown":
-            for stream_name in list(_ffmpeg_procs):
-                stop_publisher(stream_name)
-            for session_id in list(_archive_sessions):
-                stop_archive_session(session_id)
-            await close_all_tcp_tunnels()
-            sys.exit(0)
-
-        if action == "get_status":
-            await ws_send(ws, {"type": "stream_status", "streams": publisher_status()})
-            if request_id:
-                await send_reply(ws, request_id, ok=True)
-            return
-
-        if action == "archive_list":
-            items = await asyncio.to_thread(
-                list_archive_items,
-                msg["site"],
-                msg["cameras"],
-                msg.get("camera_id"),
-                parse_server_time(msg["start"]),
-                parse_server_time(msg["end"]),
-                int(msg.get("limit", 200)),
-            )
-            await send_reply(ws, request_id, ok=True, items=items)
-            return
-
-        if action == "archive_start_playback":
-            session = await asyncio.to_thread(
-                start_archive_session,
-                msg["site"],
-                msg["camera"],
-                parse_server_time(msg["start"]),
-                parse_server_time(msg["end"]),
-            )
-            await send_reply(
-                ws,
-                request_id,
-                ok=True,
-                session_id=session["session_id"],
-                stream_path=session["stream_path"],
-                vendor=session["vendor"],
-                expires_at=iso_utc(session["expires_at"]),
-            )
-            return
-
-        if action == "archive_stop_playback":
-            stopped = stop_archive_session(msg["session_id"])
-            await send_reply(ws, request_id, ok=True, stopped=stopped)
-            return
-
-        if action == "tcp_open":
-            await open_tcp_tunnel(ws, msg["connection_id"], msg["target_host"], int(msg["target_port"]))
-            await send_reply(ws, request_id, ok=True)
-            return
-
-        if action == "tcp_data":
-            await write_tcp_tunnel(msg["connection_id"], msg["data"])
-            return
-
-        if action == "tcp_close":
-            await close_tcp_tunnel(msg["connection_id"])
-            return
-
+    handler = _ACTION_HANDLERS.get(action)
+    if handler is None:
         if request_id:
             await send_reply(ws, request_id, ok=False, error=f"Unsupported action: {action}")
+        return
+
+    try:
+        await handler(ws, msg, request_id)
     except AdapterError as exc:
         if request_id:
             await send_reply(ws, request_id, ok=False, error=str(exc))
@@ -2335,5 +2357,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
