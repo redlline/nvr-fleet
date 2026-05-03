@@ -78,22 +78,30 @@ docker compose up -d
 
 ### Установка агента на мини-ПК
 
+**Рекомендуемый способ — через UI панели:**
+
+1. Создать площадку в **Sites → Add site**
+2. Открыть площадку → кнопка **Deploy config**
+3. Панель покажет готовую команду установки вида:
+   ```
+   curl -s https://nvr.yourserver.com/install.sh | bash -s -- \
+     --site <SITE_ID> --token <AGENT_TOKEN> --server nvr.yourserver.com
+   ```
+4. Выполнить эту команду на мини-ПК — скрипт установит все зависимости,
+   создаст systemd-сервисы и запустит агента автоматически.
+
+> `install.sh` доступен по адресу `https://nvr.yourserver.com/install.sh` —
+> он обслуживается самим fleet-server, адрес генерируется панелью автоматически.
+
+**Ручная установка (если UI недоступен):**
+
 ```bash
-# Скачать скрипт установки с вашего VPS
-curl -s https://nvr.yourserver.com/install.sh | bash
-
-# Или вручную (без install.sh):
-mkdir -p /opt/nvr-fleet-agent && cd /opt/nvr-fleet-agent
-curl -fsSL https://nvr.yourserver.com/agent/agent.py -o agent.py
-python3 -m venv .venv
-.venv/bin/pip install --quiet websockets pyyaml fastapi uvicorn
-
-# Создать /etc/nvr-fleet-agent.env с переменными:
-# SITE_ID, AGENT_TOKEN, SERVER_HOST, SERVER_WS, SERVER_API
-# (generate с сервера через deploy config или вручную)
-
-.venv/bin/python agent.py
+curl -s https://nvr.yourserver.com/install.sh | bash -s -- \
+  --site <SITE_ID> --token <AGENT_TOKEN> --server nvr.yourserver.com
 ```
+
+После установки агент запускается как systemd-сервис `nvr-fleet-agent`
+и автоматически переподключается при потере сети.
 
 
 ## Роли пользователей
@@ -238,6 +246,7 @@ SQLAlchemy-модели совместимы без изменений кода.
 ---
 
 *Проект активно развивается. Issues и PR приветствуются.*
+
 
 
 
