@@ -99,17 +99,17 @@ export default function CamerasTab({ siteId, site }) {
           <thead>
             <tr>
               <th>CH</th>
-              <th{t("camName")}</th>
-              <th{t("camChannelId")}</th>
-              <th{t("camStream")}</th>
-              <th{t("camRtspPath")}</th>
-              <th{t("camEnabled")}</th>
+              <th>{t("camName")}</th>
+              <th>{t("camChannelId")}</th>
+              <th>{t("camStream")}</th>
+              <th>{t("camRtspPath")}</th>
+              <th>{t("camEnabled")}</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {cameras.length === 0 && (
-              <tr><td colSpan={7} className="empty-state">{t("noCamerasConfigured")}</</td></tr>
+              <tr><td colSpan={7} className="empty-state">{t("noCamerasConfigured")}</td></tr>
             )}
             {cameras.map(cam => {
               const name    = getVal(cam, "name")
@@ -211,12 +211,12 @@ function AddCameraModal({ onClose, onSave, existingChannels }) {
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 400 }}>
-        <div className="modal-title">{t("addCamera")}</</div>
+        <div className="modal-title">{t("addCamera")}</div>
         {error && <div className="alert alert-error">{error}</div>}
         <form onSubmit={submit}>
           <div className="form-group">
             <label className="form-label">Camera name</label>
-            <input className="form-input" value={form.name} onChange={e => upd("name", e.target.value)} required placeholder=t("egEntrance") />
+            <input className="form-input" value={form.name} onChange={e => upd("name", e.target.value)} required placeholder={t("egEntrance")} />
           </div>
           <div className="form-row">
             <div className="form-group">

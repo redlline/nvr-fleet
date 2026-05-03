@@ -245,17 +245,17 @@ export default function ArchiveTab({ siteId, publicHost }) {
         <table>
           <thead>
             <tr>
-              <th{t("camera")}</th>
-              <th{t("archiveType")}</th>
-              <th{t("start")}</th>
-              <th{t("end")}</th>
-              <th{t("source")}</th>
-              <th{t("action")}</th>
+              <th>{t("camera")}</th>
+              <th>{t("archiveType")}</th>
+              <th>{t("start")}</th>
+              <th>{t("end")}</th>
+              <th>{t("source")}</th>
+              <th>{t("action")}</th>
             </tr>
           </thead>
           <tbody>
             {recordings.length === 0 && (
-              <tr><td colSpan={6} className="empty-state">{t("noRecordings")}</</td></tr>
+              <tr><td colSpan={6} className="empty-state">{t("noRecordings")}</td></tr>
             )}
             {recordings.map((item) => (
               <tr key={`${item.camera_id}-${item.start}-${item.end}`}>

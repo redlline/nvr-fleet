@@ -58,18 +58,18 @@ export default function StreamsTab({ siteId, publicHost }) {
         <table>
           <thead>
             <tr>
-              <th{t("status")}</th>
-              <th{t("camera")}</th>
-              <th{t("streamPath")}</th>
-              <th{t("rtspUrl")}</th>
-              <th{t("hlsUrl")}</th>
-              <th{t("watch")}</th>
-              <th{t("updated")}</th>
+              <th>{t("status")}</th>
+              <th>{t("camera")}</th>
+              <th>{t("streamPath")}</th>
+              <th>{t("rtspUrl")}</th>
+              <th>{t("hlsUrl")}</th>
+              <th>{t("watch")}</th>
+              <th>{t("updated")}</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="empty-state">{t("noEnabledCameras")}</</td></tr>
+              <tr><td colSpan={7} className="empty-state">{t("noEnabledCameras")}</td></tr>
             )}
             {rows.map(({ camera, path, ready, updated, streamStat }) => {
               // rtsp_url comes from the server — it knows the real viewer credentials
