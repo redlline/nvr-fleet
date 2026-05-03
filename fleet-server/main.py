@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import re
 import requests
 import secrets
 import socket
@@ -18,6 +19,8 @@ from http.cookies import SimpleCookie
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+import urllib.error
+import urllib.request
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Request, status, BackgroundTasks, UploadFile, File
@@ -98,7 +101,7 @@ def _ensure_db_schema() -> None:
 
 _ensure_db_schema()
 
-app = FastAPI(title="NVR Fleet Server", version="1.0.0")
+app = FastAPI(title="NVR Fleet Server", version="1.0.0", lifespan=lifespan)
 
 # Build CORS origin list from PUBLIC_HOST.
 # Falls back to ["*"] only if PUBLIC_HOST is unset (dev/test environments).
@@ -445,9 +448,6 @@ def _load_docker_client():
 
 
 def _http_probe(url: str, timeout: int = 3) -> tuple[Optional[bool], str]:
-    import urllib.error
-    import urllib.parse
-    import urllib.request
 
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -1256,19 +1256,22 @@ async def _sync_tunnel_listeners(db: Session) -> None:
     await tunnel_manager.sync(sites)
 
 
-@app.on_event("startup")  # noqa: deprecated — migrate to lifespan when FastAPI>=0.100
-async def startup_event() -> None:
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app_: "FastAPI"):
+    """FastAPI lifespan — replaces deprecated on_event startup/shutdown handlers."""
+    # ── Startup ──────────────────────────────────────────────────────────────
     asyncio.create_task(_mtx_metrics_poll_loop())
     if MTX_TOOLKIT_SYNC_ENABLED:
         asyncio.create_task(_mtx_toolkit_sync_loop())
     db = SessionLocal()
     try:
-        # Create default admin user if no users exist
         if db.query(User).count() == 0:
-            default_password = ADMIN_TOKEN
             admin = User(
                 username="admin",
-                password_hash=_hash_password(default_password),
+                password_hash=_hash_password(ADMIN_TOKEN),
                 role="admin",
                 allowed_sites="[]",
             )
@@ -1293,9 +1296,9 @@ async def startup_event() -> None:
     finally:
         db.close()
 
+    yield  # ← application is running
 
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
+    # ── Shutdown ─────────────────────────────────────────────────────────────
     await tunnel_manager.shutdown()
 
 
@@ -1351,7 +1354,7 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
             reply_to = msg.get("reply_to")
 
             if reply_to:
-                pending = pending_agent_requests.get(reply_to)
+                pending = pending_agentrequests.get(reply_to)
                 if pending:
                     _, future = pending
                     if not future.done():
@@ -1849,13 +1852,11 @@ _mtx_last_poll: dict = {}
 
 def _poll_mtx_metrics():
     """Poll MediaMTX metrics and store delta samples. Called by background scheduler."""
-    import re
     global _mtx_samples, _mtx_last_poll
     try:
         resp = requests.get(
             f"{MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')}/metrics",
-            auth=(mediamtx_internal_api_user(), mediamtx_internal_api_pass()),
-            timeout=3,
+            timeout=3,  # MediaMTX /metrics is a Prometheus endpoint — no auth required
         )
         resp.raise_for_status()
     except Exception:
@@ -1917,13 +1918,11 @@ async def _mtx_metrics_poll_loop():
     await asyncio.sleep(10)  # initial delay
     while True:
         try:
-            import re as _re
             _target = MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')
-            import requests as _requests
             _resp = await asyncio.to_thread(
-                lambda: _requests.get(
+                lambda: requests.get(
                     f"{_target}/metrics",
-                    auth=(mediamtx_internal_api_user(), mediamtx_internal_api_pass()),
+                    # MediaMTX /metrics is unauthenticated Prometheus endpoint
                     timeout=3,
                 )
             )
@@ -1934,10 +1933,10 @@ async def _mtx_metrics_poll_loop():
             for _line in _resp.text.splitlines():
                 if _line.startswith("#") or not _line.strip():
                     continue
-                _m = _re.match(r'paths_bytes_received\{name="([^"]+)"[^}]*\}\s+([\d.]+)', _line)
+                _m = re.match(r'paths_bytes_received\{name="([^"]+)"[^}]*\}\s+([\d.]+)', _line)
                 if _m:
                     _rx[_m.group(1)] = int(float(_m.group(2)))
-                _m = _re.match(r'paths_bytes_sent\{name="([^"]+)"[^}]*\}\s+([\d.]+)', _line)
+                _m = re.match(r'paths_bytes_sent\{name="([^"]+)"[^}]*\}\s+([\d.]+)', _line)
                 if _m:
                     _tx[_m.group(1)] = int(float(_m.group(2)))
             _all = set(list(_rx.keys()) + list(_tx.keys()))
@@ -1966,12 +1965,10 @@ async def _mtx_metrics_poll_loop():
 @app.get("/api/traffic/realtime")
 def get_traffic_realtime(_=Depends(require_viewer)):
     """Real-time traffic: latest MTX metrics sample (rx/tx bytes per second)."""
-    import re
     try:
         resp = requests.get(
             f"{MEDIAMTX_HLS_PROXY_TARGET.replace(':8888', ':9998')}/metrics",
-            auth=(mediamtx_internal_api_user(), mediamtx_internal_api_pass()),
-            timeout=3,
+            timeout=3,  # MediaMTX /metrics is a Prometheus endpoint — no auth required
         )
         resp.raise_for_status()
     except Exception:
@@ -2453,8 +2450,6 @@ def _is_hls_muxer_pending(proxy_path: str, status_code: int, content: bytes, med
 
 
 def _hls_proxy_request(proxy_path: str, query_string: str, method: str = "GET", range_header: str = "") -> Response:
-    import urllib.error
-    import urllib.request
 
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -2550,8 +2545,6 @@ def _write_tls_files(fullchain_pem: str, privkey_pem: str) -> TlsCertificateInfo
 
 
 def _mtx_toolkit_request(path: str, *, method: str = "GET", data: Optional[dict] = None, timeout: int = 5):
-    import urllib.error
-    import urllib.request
 
     if not MTX_TOOLKIT_API:
         raise RuntimeError("MTX Toolkit API URL is not configured")
@@ -2793,6 +2786,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 
