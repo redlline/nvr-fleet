@@ -26,7 +26,22 @@ def site_publish_user(site_id: str) -> str:
 
 
 def site_publish_pass(site_id: str) -> str:
-    return f"PASS_{site_id}"
+    """
+    Derive a per-site publish password that is not guessable from site_id alone.
+    Uses HMAC-SHA256(MEDIAMTX_PUBLISH_SECRET, site_id) — unpredictable even
+    if the caller knows site_id (which is visible in the API).
+    Falls back to a warning + legacy format when the secret is not set.
+    """
+    import hmac as _hmac, hashlib as _hashlib, logging as _log
+    secret = os.environ.get("MEDIAMTX_PUBLISH_SECRET", "")
+    if not secret:
+        _log.getLogger(__name__).warning(
+            "MEDIAMTX_PUBLISH_SECRET is not set — publish passwords are "
+            "derived from site_id and are guessable. Set MEDIAMTX_PUBLISH_SECRET in .env."
+        )
+        return f"PASS_{site_id}"
+    mac = _hmac.new(secret.encode(), site_id.encode(), _hashlib.sha256)
+    return mac.hexdigest()[:32]
 
 
 def mediamtx_internal_api_user() -> str:
@@ -108,16 +123,9 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
                  k.startswith("~^site")
              )}
 
+    # NOTE: "any" user removed — anonymous read access disabled.
+    # Only the named "viewer" account (MEDIAMTX_VIEWER_PASS) can read streams.
     auth_users = [
-        {
-            "user": "any",
-            "pass": "",
-            "ips": [],
-            "permissions": [
-                {"action": "read"},
-                {"action": "playback"},
-            ],
-        },
         {
             "user": "viewer",
             "pass": mediamtx_viewer_pass(),
@@ -180,6 +188,7 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
     Path(mediamtx_yml_path).parent.mkdir(parents=True, exist_ok=True)
     with open(mediamtx_yml_path, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+
 
 
 

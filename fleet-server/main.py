@@ -155,8 +155,23 @@ def require_operator(user: "User" = Depends(_get_current_user)) -> "User":
 
 
 def require_viewer(user: "User" = Depends(_get_current_user)) -> "User":
-    # Any authenticated user can view
     return user
+
+
+def _check_site_access(user: "User", site_id: str) -> None:
+    """Enforce site-level ACL. Admins see all. Others see only allowed_sites."""
+    if user.role == "admin":
+        return
+    import json as _j
+    try:
+        allowed = _j.loads(user.allowed_sites or "[]")
+    except Exception:
+        allowed = []
+    if allowed and site_id not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access to site {site_id!r} is not permitted for this account",
+        )
 MEDIAMTX_YAML = os.environ.get("MEDIAMTX_YAML", "/app/mediamtx.yml")
 MEDIAMTX_API  = os.environ.get("MEDIAMTX_API",  "http://host.docker.internal:9997")
 PUBLIC_HOST   = os.environ.get("PUBLIC_HOST",    "localhost")
@@ -1428,8 +1443,16 @@ async def call_agent(site_id: str, payload: dict, timeout: int = 20) -> dict:
 # ─── Sites ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/sites", response_model=list[SiteOut])
-def list_sites(db: Session = Depends(get_db), _=Depends(require_viewer)):
+def list_sites(db: Session = Depends(get_db), user=Depends(require_viewer)):
+    import json as _j
     sites = db.query(Site).all()
+    if user.role != "admin":
+        try:
+            allowed = _j.loads(user.allowed_sites or "[]")
+        except Exception:
+            allowed = []
+        if allowed:
+            sites = [s for s in sites if s.id in allowed]
     return [_build_site_out(site, db) for site in sites]
 
 
@@ -1492,7 +1515,8 @@ async def create_site(data: SiteCreate, db: Session = Depends(get_db), _=Depends
 
 
 @app.get("/api/sites/{site_id}", response_model=SiteOut)
-def get_site(site_id: str, db: Session = Depends(get_db), _=Depends(require_viewer)):
+def get_site(site_id: str, db: Session = Depends(get_db), user=Depends(require_viewer)):
+    _check_site_access(user, site_id)
     site = db.query(Site).filter_by(id=site_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
@@ -1570,7 +1594,8 @@ async def delete_site(site_id: str, db: Session = Depends(get_db), _=Depends(req
 # ─── Cameras ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/sites/{site_id}/cameras", response_model=list[CameraOut])
-def list_cameras(site_id: str, db: Session = Depends(get_db), _=Depends(require_viewer)):
+def list_cameras(site_id: str, db: Session = Depends(get_db), user=Depends(require_viewer)):
+    _check_site_access(user, site_id)
     _ensure_site_exists(site_id, db)
     return db.query(Camera).filter_by(site_id=site_id).order_by(Camera.channel).all()
 
@@ -1769,7 +1794,8 @@ async def replace_agent_cameras(
 # ─── Streams & Traffic ────────────────────────────────────────────────────────
 
 @app.get("/api/sites/{site_id}/streams")
-def get_stream_stats(site_id: str, db: Session = Depends(get_db), _=Depends(require_viewer)):
+def get_stream_stats(site_id: str, db: Session = Depends(get_db), user=Depends(require_viewer)):
+    _check_site_access(user, site_id)
     _ensure_site_exists(site_id, db)
     stats = db.query(StreamStat).filter_by(site_id=site_id).all()
     results = []
@@ -1782,7 +1808,8 @@ def get_stream_stats(site_id: str, db: Session = Depends(get_db), _=Depends(requ
 
 
 @app.get("/api/sites/{site_id}/traffic")
-def get_traffic(site_id: str, hours: int = 1, db: Session = Depends(get_db), _=Depends(require_viewer)):
+def get_traffic(site_id: str, hours: int = 1, db: Session = Depends(get_db), user=Depends(require_viewer)):
+    _check_site_access(user, site_id)
     _ensure_site_exists(site_id, db)
     since = datetime.utcnow() - timedelta(hours=hours)
     samples = (db.query(TrafficSample)
@@ -2717,6 +2744,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 
