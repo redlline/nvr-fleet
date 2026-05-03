@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api } from "../lib/api"
+import { t } from "../lib/i18n"
 
 export default function StreamsTab({ siteId, publicHost }) {
   const [streams, setStreams] = useState([])
@@ -50,25 +51,25 @@ export default function StreamsTab({ siteId, publicHost }) {
         <span className={`badge ${onlineCount > 0 ? "badge-green" : "badge-gray"}`}>
           {onlineCount} / {rows.length} live
         </span>
-        <button className="btn btn-ghost btn-sm" onClick={load}>Refresh</button>
+        <button className="btn btn-ghost btn-sm" onClick={load}{t("refresh")}</button>
       </div>
 
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Status</th>
-              <th>Camera</th>
-              <th>Stream path</th>
-              <th>RTSP URL</th>
-              <th>HLS URL</th>
-              <th>Watch</th>
-              <th>Updated</th>
+              <th{t("status")}</th>
+              <th{t("camera")}</th>
+              <th{t("streamPath")}</th>
+              <th{t("rtspUrl")}</th>
+              <th{t("hlsUrl")}</th>
+              <th{t("watch")}</th>
+              <th{t("updated")}</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="empty-state">No enabled cameras</td></tr>
+              <tr><td colSpan={7} className="empty-state"{t("noEnabledCameras")}</td></tr>
             )}
             {rows.map(({ camera, path, ready, updated, streamStat }) => {
               // rtsp_url comes from the server — it knows the real viewer credentials
@@ -141,4 +142,5 @@ function CopyField({ value, label }) {
     </button>
   )
 }
+
 

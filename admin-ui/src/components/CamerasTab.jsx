@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { api } from "../lib/api"
+import { t } from "../lib/i18n"
 
 export default function CamerasTab({ siteId, site }) {
   const [cameras, setCameras]   = useState([])
@@ -79,8 +80,8 @@ export default function CamerasTab({ siteId, site }) {
           {enabledCount} / {cameras.length} enabled
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => toggleAll(true)}>Enable all</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => toggleAll(false)}>Disable all</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => toggleAll(true)}{t("enableAll")}</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => toggleAll(false)}{t("disableAll")}</button>
           <button className="btn btn-ghost btn-sm" onClick={() => switchAllStream("main")}>All → Main</button>
           <button className="btn btn-ghost btn-sm" onClick={() => switchAllStream("sub")}>All → Sub</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowAdd(true)}>+ Add camera</button>
@@ -98,17 +99,17 @@ export default function CamerasTab({ siteId, site }) {
           <thead>
             <tr>
               <th>CH</th>
-              <th>Name</th>
-              <th>Channel ID</th>
-              <th>Stream</th>
-              <th>RTSP path</th>
-              <th>Enabled</th>
+              <th{t("camName")}</th>
+              <th{t("camChannelId")}</th>
+              <th{t("camStream")}</th>
+              <th{t("camRtspPath")}</th>
+              <th{t("camEnabled")}</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {cameras.length === 0 && (
-              <tr><td colSpan={7} className="empty-state">No cameras configured</td></tr>
+              <tr><td colSpan={7} className="empty-state"{t("noCamerasConfigured")}</td></tr>
             )}
             {cameras.map(cam => {
               const name    = getVal(cam, "name")
@@ -210,12 +211,12 @@ function AddCameraModal({ onClose, onSave, existingChannels }) {
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 400 }}>
-        <div className="modal-title">Add camera</div>
+        <div className="modal-title"{t("addCamera")}</div>
         {error && <div className="alert alert-error">{error}</div>}
         <form onSubmit={submit}>
           <div className="form-group">
             <label className="form-label">Camera name</label>
-            <input className="form-input" value={form.name} onChange={e => upd("name", e.target.value)} required placeholder="e.g. Entrance" />
+            <input className="form-input" value={form.name} onChange={e => upd("name", e.target.value)} required placeholder=t("egEntrance") />
           </div>
           <div className="form-row">
             <div className="form-group">
@@ -235,12 +236,12 @@ function AddCameraModal({ onClose, onSave, existingChannels }) {
               <input type="checkbox" checked={form.enabled} onChange={e => upd("enabled", e.target.checked)} />
               <div className="toggle-track" /><div className="toggle-thumb" />
             </label>
-            <span className="form-label" style={{ margin: 0 }}>Enabled</span>
+            <span className="form-label" style={{ margin: 0 }}{t("camEnabled")}</span>
           </div>
           <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn btn-ghost" onClick={onClose}{t("cancel")}</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? <><span className="spinner" /> Adding...</> : "Add camera"}
+              {saving ? <><span className="spinner" /> Adding...</> : t("addCamera")}
             </button>
           </div>
         </form>
@@ -248,3 +249,4 @@ function AddCameraModal({ onClose, onSave, existingChannels }) {
     </div>
   )
 }
+

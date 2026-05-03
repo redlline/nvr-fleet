@@ -183,7 +183,33 @@ const translations = {
     size: "Size",
     noBackups: "No rotated backups on server yet.",
     backupDesc: "Export includes sites, cameras, agent tokens and TLS files. Import replaces the current configuration and redeploys the restored sites.",
-  },
+  
+    // Cameras/Streams/Archive
+    camName: "Name",
+    camChannelId: "Channel ID",
+    camStream: "Stream",
+    camRtspPath: "RTSP path",
+    camEnabled: "Enabled",
+    noCamerasConfigured: "No cameras configured",
+    cameraName: "Camera name",
+    channelNumber: "Channel number",
+    streamType: "Stream type",
+    egEntrance: "e.g. Entrance",
+    camera: "Camera",
+    rtspUrl: "RTSP URL",
+    hlsUrl: "HLS URL",
+    noEnabledCameras: "No live streams",
+    allCameras: "All cameras",
+    archiveType: "Type",
+    start: "Start",
+    end: "End",
+    source: "Source",
+    action: "Action",
+    searchArchive: "Search archive",
+    noRecordings: "No recordings in the selected range",
+    play: "Play",
+    stop: "Stop",
+},
   ru: {
     dashboard: "Дашборд",
     sites: "Площадки",
@@ -366,7 +392,33 @@ const translations = {
     noBackups: "Резервных копий на сервере нет.",
     backupDesc: "Экспорт включает площадки, камеры, токены агентов и TLS файлы. Импорт заменяет текущую конфигурацию.",
 
-  },
+  
+    // Камеры/Потоки/Архив
+    camName: "Название",
+    camChannelId: "ID канала",
+    camStream: "Поток",
+    camRtspPath: "RTSP путь",
+    camEnabled: "Включена",
+    noCamerasConfigured: "Камеры не настроены",
+    cameraName: "Имя камеры",
+    channelNumber: "Номер канала",
+    streamType: "Тип потока",
+    egEntrance: "напр. Вход",
+    camera: "Камера",
+    rtspUrl: "RTSP URL",
+    hlsUrl: "HLS URL",
+    noEnabledCameras: "Нет активных потоков",
+    allCameras: "Все камеры",
+    archiveType: "Тип",
+    start: "Начало",
+    end: "Конец",
+    source: "Источник",
+    action: "Действие",
+    searchArchive: "Поиск в архиве",
+    noRecordings: "Нет записей за период",
+    play: "Воспроизвести",
+    stop: "Стоп",
+},
   tk: {
     dashboard: "Dolandyryş paneli",
     sites: "Meýdançalar",
@@ -549,7 +601,33 @@ const translations = {
     noBackups: "Serwerde ätiýaçlyk nusgasy ýok.",
     backupDesc: "Eksport meýdançalary, kameralary, agent tokenlerini we TLS faýllaryny öz içine alýar.",
 
-  },
+  
+    // Kameralar/Akymlar/Arhiw
+    camName: "Ady",
+    camChannelId: "Kanal ID",
+    camStream: "Akym",
+    camRtspPath: "RTSP ýoly",
+    camEnabled: "Işjeň",
+    noCamerasConfigured: "Kameralar sazlanmady",
+    cameraName: "Kamera ady",
+    channelNumber: "Kanal belgisi",
+    streamType: "Akym görnüşi",
+    egEntrance: "mys. Giriş",
+    camera: "Kamera",
+    rtspUrl: "RTSP URL",
+    hlsUrl: "HLS URL",
+    noEnabledCameras: "Janly akym ýok",
+    allCameras: "Ähli kameralar",
+    archiveType: "Görnüş",
+    start: "Başlangyç",
+    end: "Soňy",
+    source: "Çeşme",
+    action: "Hereket",
+    searchArchive: "Arhiwde gözle",
+    noRecordings: "Saýlanan döwürde ýazgy ýok",
+    play: "Oýnat",
+    stop: "Dur",
+},
 }
 
 const LANG_KEY = "nvr_fleet_lang"
@@ -574,6 +652,7 @@ export const LANGS = [
   { code: "ru", label: "RU" },
   { code: "tk", label: "TK" },
 ]
+
 
 
 
