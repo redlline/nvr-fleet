@@ -49,7 +49,15 @@ def mediamtx_internal_api_user() -> str:
 
 
 def mediamtx_internal_api_pass() -> str:
-    return os.environ.get("MEDIAMTX_API_PASS", "MEDIAMTX_INTERNAL_PASS")
+    val = os.environ.get("MEDIAMTX_API_PASS", "")
+    if not val:
+        import logging as _log, secrets as _s
+        _log.getLogger(__name__).warning(
+            "MEDIAMTX_API_PASS is not set — MediaMTX internal API has no password. "
+            "Set MEDIAMTX_API_PASS in .env."
+        )
+        return "unset-" + _s.token_hex(4)  # unpredictable even when unset
+    return val
 
 
 def mediamtx_viewer_pass() -> str:
@@ -188,6 +196,7 @@ def update_mediamtx_paths(mediamtx_yml_path: str, sites, cameras) -> None:
     Path(mediamtx_yml_path).parent.mkdir(parents=True, exist_ok=True)
     with open(mediamtx_yml_path, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+
 
 
 

@@ -15,7 +15,7 @@ import time
 import uuid
 import zipfile
 from http.cookies import SimpleCookie
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -217,16 +217,6 @@ def _get_archive_semaphore(site_id: str, max_concurrent: int = 2) -> asyncio.Sem
     return _archive_semaphores[site_id]
 agent_send_locks: dict[str, asyncio.Lock] = {}
 pending_agent_requests: dict[str, tuple[str, asyncio.Future]] = {}
-
-# Archive RPC rate limiting: max 2 concurrent archive requests per site
-# (Hikvision/Dahua NVRs typically have a 2–4 ISAPI session limit)
-_archive_semaphores: dict[str, asyncio.Semaphore] = {}
-
-
-def _get_archive_semaphore(site_id: str, max_concurrent: int = 2) -> asyncio.Semaphore:
-    if site_id not in _archive_semaphores:
-        _archive_semaphores[site_id] = asyncio.Semaphore(max_concurrent)
-    return _archive_semaphores[site_id]
 # traffic accumulators: site_id -> bytes this minute
 traffic_acc:   dict[str, int] = {}
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -273,7 +263,7 @@ def _load_tls_info_from_text(fullchain_pem: str, privkey_pem: str) -> TlsCertifi
         san=san,
         not_before=not_before,
         not_after=not_after,
-        expires_in_days=max((not_after - datetime.utcnow()).days, 0),
+        expires_in_days=max((not_after - datetime.now(timezone.utc)).days, 0),
         fingerprint_sha256=fingerprint,
     )
 
@@ -691,7 +681,7 @@ def _parse_datetime_value(value):
 def _build_backup_payload(db: Session) -> dict:
     return {
         "version": BACKUP_VERSION,
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(timezone.utc).isoformat(),
         "sites": [_serialize_site(site) for site in db.query(Site).order_by(Site.created_at, Site.id).all()],
         "cameras": [_serialize_camera(camera) for camera in db.query(Camera).order_by(Camera.site_id, Camera.channel).all()],
         "agents": [_serialize_agent(agent) for agent in db.query(Agent).order_by(Agent.site_id).all()],
@@ -744,7 +734,7 @@ def _list_rotated_backups() -> list[BackupFileOut]:
 def _write_rotated_backup(db: Session, keep: Optional[int] = None) -> tuple[BackupFileOut, list[str], int]:
     target_dir = _ensure_backup_rotate_dir()
     keep_count = _normalized_backup_keep(keep)
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"{BACKUP_ROTATE_PREFIX}{timestamp}.zip"
     path = target_dir / filename
     if path.exists():
@@ -831,7 +821,7 @@ def _restore_backup_payload(db: Session, payload: dict) -> tuple[int, int, int]:
             tunnel_rtsp_port=item.get("tunnel_rtsp_port"),
             channel_count=item.get("channel_count", 0),
             stream_type=item.get("stream_type", "main"),
-            created_at=_parse_datetime_value(item.get("created_at")) or datetime.utcnow(),
+            created_at=_parse_datetime_value(item.get("created_at")) or datetime.now(timezone.utc),
         ))
     db.flush()
 
@@ -1125,7 +1115,7 @@ def _build_site_out(site: Site, db: Session) -> SiteOut:
 
 
 def _update_stream_stats(site_id: str, streams: dict[str, bool], db: Session) -> None:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     normalized = {normalize_stream_path(path): ready for path, ready in streams.items()}
     existing = {
         stat.stream_path: stat
@@ -1313,7 +1303,7 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
     active_agents[site_id] = ws
     agent_send_locks[site_id] = asyncio.Lock()
     agent.online = True
-    agent.last_seen = datetime.utcnow()
+    agent.last_seen = datetime.now(timezone.utc)
     db.commit()
     logger.info(f"Agent connected: {site_id}")
     await _deploy_config(site_id, db)
@@ -1334,7 +1324,7 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
                     pong_raw = await asyncio.wait_for(ws.receive_text(), timeout=PONG_TIMEOUT)
                     pong = json.loads(pong_raw)
                     if pong.get("type") == "pong":
-                        agent.last_seen = datetime.utcnow()
+                        agent.last_seen = datetime.now(timezone.utc)
                         db.commit()
                         continue
                     # Unexpected message after ping — process it normally
@@ -1359,7 +1349,7 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
                 continue
 
             if mtype in {"heartbeat", "pong"}:
-                agent.last_seen = datetime.utcnow()
+                agent.last_seen = datetime.now(timezone.utc)
                 if mtype == "heartbeat":
                     agent.version   = msg.get("version", "")
                     agent.uptime    = msg.get("uptime", 0)
@@ -1373,7 +1363,7 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
                         stream_path=path,
                         rx_bytes=stats.get("rx", 0),
                         tx_bytes=stats.get("tx", 0),
-                        ts=datetime.utcnow(),
+                        ts=datetime.now(timezone.utc),
                     )
                     db.add(sample)
                 db.commit()
@@ -1392,7 +1382,7 @@ async def agent_ws(ws: WebSocket, site_id: str, db: Session = Depends(get_db)):
         active_agents.pop(site_id, None)
         agent_send_locks.pop(site_id, None)
         agent.online = False
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for stat in db.query(StreamStat).filter_by(site_id=site_id).all():
             stat.ready = False
             stat.updated = now
@@ -1475,7 +1465,7 @@ async def create_site(data: SiteCreate, db: Session = Depends(get_db), _=Depends
         nvr_port   = payload["nvr_port"],
         channel_count = payload["channel_count"],
         stream_type   = payload["stream_type"],
-        created_at    = datetime.utcnow(),
+        created_at    = datetime.now(timezone.utc),
     )
     db.add(site)
     db.flush()
@@ -1811,7 +1801,7 @@ def get_stream_stats(site_id: str, db: Session = Depends(get_db), user=Depends(r
 def get_traffic(site_id: str, hours: int = 1, db: Session = Depends(get_db), user=Depends(require_viewer)):
     _check_site_access(user, site_id)
     _ensure_site_exists(site_id, db)
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
     samples = (db.query(TrafficSample)
                .filter(TrafficSample.site_id == site_id, TrafficSample.ts >= since)
                .order_by(TrafficSample.ts)
@@ -1821,7 +1811,7 @@ def get_traffic(site_id: str, hours: int = 1, db: Session = Depends(get_db), use
 
 @app.get("/api/traffic/total")
 def get_total_traffic(hours: int = 24, db: Session = Depends(get_db), _=Depends(require_viewer)):
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
     samples = (db.query(TrafficSample)
                .filter(TrafficSample.ts >= since)
                .order_by(TrafficSample.ts)
@@ -1862,7 +1852,7 @@ def _poll_mtx_metrics():
     except Exception:
         return
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     rx_bytes = {}
     tx_bytes = {}
 
@@ -1891,19 +1881,19 @@ def _poll_mtx_metrics():
         })
 
     # Keep only last 24h of samples
-    cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat() + "Z"
     _mtx_samples = [s for s in _mtx_samples if s["ts"] >= cutoff]
 
     _mtx_last_poll = {
         path: {"rx": rx_bytes.get(path, 0), "tx": tx_bytes.get(path, 0)}
         for path in all_paths
     }
-    _mtx_last_poll["__ts__"] = datetime.utcnow().timestamp()
+    _mtx_last_poll["__ts__"] = datetime.now(timezone.utc).timestamp()
 
 
 def _parse_mtx_metrics(site_id, hours: int):
     """Return stored MediaMTX traffic samples filtered by site_id and hours."""
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat() + "Z"
     result = []
     for s in _mtx_samples:
         if s["ts"] < cutoff:
@@ -1929,7 +1919,7 @@ async def _mtx_metrics_poll_loop():
                 )
             )
             _resp.raise_for_status()
-            _now = datetime.utcnow()
+            _now = datetime.now(timezone.utc)
             _rx = {}
             _tx = {}
             for _line in _resp.text.splitlines():
@@ -1952,10 +1942,10 @@ async def _mtx_metrics_poll_loop():
                     "tx_bytes": _dtx,
                     "stream_path": _path,
                 })
-            _cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
+            _cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat() + "Z"
             _mtx_samples = [s for s in _mtx_samples if s["ts"] >= _cutoff]
             _mtx_last_poll = {p: {"rx": _rx.get(p, 0), "tx": _tx.get(p, 0)} for p in _all}
-            _mtx_last_poll["__ts__"] = datetime.utcnow().timestamp()
+            _mtx_last_poll["__ts__"] = datetime.now(timezone.utc).timestamp()
             logger.info("MTX poll: %d paths, samples=%d", len(_all), len(_mtx_samples))
         except Exception as exc:
             logger.info("MTX metrics poll error: %s", exc)
@@ -1991,7 +1981,7 @@ def get_traffic_realtime(_=Depends(require_viewer)):
             tx_bytes[m.group(1)] = int(float(m.group(2)))
 
     global _mtx_last_poll
-    now_ts = datetime.utcnow().timestamp()
+    now_ts = datetime.now(timezone.utc).timestamp()
     prev_ts = _mtx_last_poll.get("__ts__", now_ts - 30)
     interval = max(now_ts - prev_ts, 1)
 
@@ -2026,7 +2016,7 @@ async def list_archive(
     cameras = db.query(Camera).filter_by(site_id=site_id).order_by(Camera.channel).all()
     if camera_id is not None:
         _get_site_camera(db, site_id, camera_id)
-    end = end or datetime.utcnow()
+    end = end or datetime.now(timezone.utc)
     start = start or (end - timedelta(hours=24))
     if start >= end:
         raise HTTPException(400, "Start time must be before end time")
@@ -2161,7 +2151,7 @@ def restart_stack_services(
 
 @app.get("/api/system/backup/export")
 def export_backup(db: Session = Depends(get_db), _=Depends(require_admin)):
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     payload = _backup_zip_bytes(db)
     filename = f"nvr-fleet-backup-{timestamp}.zip"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
@@ -2201,9 +2191,12 @@ async def import_backup(
     db: Session = Depends(get_db),
     _=Depends(require_admin),
 ):
-    raw_bytes = await file.read()
+    MAX_BACKUP_SIZE = 50 * 1024 * 1024  # 50 MB
+    raw_bytes = await file.read(MAX_BACKUP_SIZE + 1)
     if not raw_bytes:
         raise HTTPException(400, "Backup file is empty")
+    if len(raw_bytes) > MAX_BACKUP_SIZE:
+        raise HTTPException(413, "Backup file exceeds 50 MB limit")
 
     payload, fullchain_pem, privkey_pem = _load_backup_archive(raw_bytes)
     imported_sites = imported_cameras = imported_agents = 0
@@ -2245,7 +2238,7 @@ def dashboard(db: Session = Depends(get_db), _=Depends(require_viewer)):
     total_cameras  = db.query(Camera).count()
     online_agents  = db.query(Agent).filter_by(online=True).count()
     online_streams = db.query(StreamStat).filter_by(ready=True).count()
-    since = datetime.utcnow() - timedelta(minutes=5)
+    since = datetime.now(timezone.utc) - timedelta(minutes=5)
     recent = db.query(TrafficSample).filter(TrafficSample.ts >= since).all()
     total_rx = sum(s.rx_bytes for s in recent)
     total_tx = sum(s.tx_bytes for s in recent)
@@ -2662,8 +2655,31 @@ async def _mtx_toolkit_sync_loop() -> None:
 
 # ── User management ────────────────────────────────────────────────────────────
 
+# Simple in-memory brute-force protection for login endpoint
+_login_attempts: dict[str, list[float]] = {}
+_LOGIN_MAX_ATTEMPTS = 10
+_LOGIN_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _check_login_rate_limit(client_ip: str) -> None:
+    """Block IPs that exceed _LOGIN_MAX_ATTEMPTS in _LOGIN_WINDOW_SECONDS."""
+    import time as _time
+    now = _time.time()
+    attempts = _login_attempts.get(client_ip, [])
+    # Expire old entries
+    attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
+    if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many login attempts. Try again in {_LOGIN_WINDOW_SECONDS // 60} minutes.",
+        )
+    attempts.append(now)
+    _login_attempts[client_ip] = attempts
+
+
 @app.post("/api/auth/login")
-def login(data: dict, db: Session = Depends(get_db)):
+def login(data: dict, request: Request, db: Session = Depends(get_db)):
+    _check_login_rate_limit(request.client.host if request.client else "unknown")
     username = (data.get("username") or "").strip()
     password = data.get("password", "")
     # Legacy password-only login removed — always require username+password.
@@ -2744,6 +2760,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 

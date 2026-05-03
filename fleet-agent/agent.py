@@ -49,7 +49,7 @@ GO2RTC_YAML = os.environ.get("GO2RTC_YAML", "/etc/go2rtc/go2rtc.yaml")
 GO2RTC_SVC = os.environ.get("GO2RTC_SVC", "go2rtc")
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "/usr/bin/ffmpeg")
 SERVER_RTSP_PORT = os.environ.get("SERVER_RTSP_PORT", "8554")
-AGENT_ADMIN_HOST = os.environ.get("AGENT_ADMIN_HOST", "0.0.0.0")
+AGENT_ADMIN_HOST = os.environ.get("AGENT_ADMIN_HOST", "127.0.0.1")  # loopback by default; set 0.0.0.0 only if remote access needed
 AGENT_ADMIN_PORT = int(os.environ.get("AGENT_ADMIN_PORT", "7070"))
 AGENT_STATE_DIR = os.environ.get("AGENT_STATE_DIR", "/var/lib/nvr-fleet-agent")
 BUNDLE_CACHE_PATH = os.environ.get("BUNDLE_CACHE_PATH", f"{AGENT_STATE_DIR}/bundle-cache.json")
@@ -2070,13 +2070,28 @@ async def send_reply(ws, request_id: str, *, ok: bool, **payload) -> None:
     await ws_send(ws, {"reply_to": request_id, "ok": ok, **payload})
 
 
+_VALID_SERVER_ACTIONS = {
+    "update_config", "restart", "drain", "shutdown", "get_status",
+    "archive_list", "archive_start_playback", "archive_stop_playback",
+    "tcp_open", "tcp_data", "tcp_close",
+}
+
+
 async def handle_message(ws: websockets.WebSocketClientProtocol, msg: dict):
+    if not isinstance(msg, dict):
+        log.warning("Ignored non-dict message from server")
+        return
+
     msg_type = msg.get("type")
     if msg_type == "ping":
         await ws_send(ws, {"type": "pong"})
         return
 
     action = msg.get("action")
+    if action is not None and action not in _VALID_SERVER_ACTIONS:
+        log.warning("Ignored unknown action %r from server — not in allowlist", action)
+        return
+
     request_id = msg.get("request_id")
     try:
         if action == "update_config":
@@ -2320,4 +2335,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

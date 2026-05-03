@@ -1,47 +1,38 @@
+# mediamtx.yml — базовая конфигурация MediaMTX
+# ВАЖНО: Этот файл перезаписывается fleet-server при деплое площадки.
+# Реальные credentials (authInternalUsers) генерируются из переменных окружения.
+# НЕ хранить пароли в этом файле вручную.
+
+logLevel: info
+logDestinations:
+  - stdout
+
 api: true
 apiAddress: :9997
-authInternalUsers:
-- ips: []
-  pass: ""
-  permissions:
-  - action: read
-  - action: playback
-  user: any
-- ips: []
-  pass: VIEWER_PASS
-  permissions:
-  - action: read
-  - action: playback
-  user: viewer
-- ips: []
-  pass: MEDIAMTX_INTERNAL_PASS
-  permissions:
-  - action: api
-  - action: metrics
-  - action: pprof
-  user: mediamtx-internal
-- ips: []
-  pass: PASS_a4bb595d
-  permissions:
-  - action: publish
-    path: ~^sitea4bb595d/.+$
-  user: sitea4bb595d
-authMethod: internal
+
+metrics: true
+metricsAddress: :9998
+
+rtsp: true
+rtspAddress: :8554
+
 hls: true
 hlsAddress: :8888
 hlsAlwaysRemux: true
 hlsSegmentCount: 7
 hlsSegmentDuration: 1s
 hlsPartDuration: 200ms
-logDestinations:
-- stdout
-logLevel: info
-metrics: true
-metricsAddress: :9998
-paths:
-  sitea4bb595d/cam01: {}
-rtsp: true
-rtspAddress: :8554
+
 webrtc: true
 webrtcAddress: :8889
 
+# authMethod и authInternalUsers задаются fleet-server при деплое.
+# До первого деплоя доступ к MediaMTX закрыт.
+authMethod: internal
+authInternalUsers:
+  - user: placeholder
+    pass: placeholder
+    ips: []
+    permissions: []
+
+paths: {}
