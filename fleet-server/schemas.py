@@ -221,10 +221,19 @@ class StackServiceStatus(BaseModel):
     restart_supported: bool = True
 
 
+class StackIntegrationStatus(BaseModel):
+    key: str
+    label: str
+    status: str
+    message: str = ""
+    target: str = ""
+
+
 class StackStatus(BaseModel):
     docker_available: bool
     docker_message: str = ""
     services: list[StackServiceStatus]
+    integrations: list[StackIntegrationStatus] = []
 
 
 class StackRestartRequest(BaseModel):

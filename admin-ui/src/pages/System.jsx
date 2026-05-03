@@ -346,6 +346,38 @@ export default function System() {
             </tbody>
           </table>
         </div>
+
+        <div style={{ height: 16 }} />
+
+        <div className="section-title" style={{ marginBottom: 14 }}>Integration health</div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Integration</th>
+                <th>Status</th>
+                <th>Target</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(stack?.integrations || []).length ? (
+                (stack.integrations || []).map((integration) => (
+                  <tr key={integration.key}>
+                    <td>{integration.label}</td>
+                    <td><Badge state={integration.status} /></td>
+                    <td style={{ color: "var(--text2)", fontSize: 12, wordBreak: "break-all" }}>{integration.target || "-"}</td>
+                    <td style={{ color: "var(--text2)", fontSize: 12 }}>{integration.message || "-"}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="4" style={{ color: "var(--text2)" }}>No integration checks reported yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </Section>
 
       <Section title={t("logs")}>
@@ -467,11 +499,11 @@ function Info({ label, value }) {
 
 function Badge({ state }) {
   const value = String(state || "unknown").toLowerCase()
-  const variant = value === "running" || value === "healthy" || value === "reachable"
+  const variant = value === "running" || value === "healthy" || value === "reachable" || value === "ok"
     ? "badge-green"
-    : value === "n/a"
+    : value === "n/a" || value === "disabled"
       ? "badge-gray"
-      : value === "unknown" || value === "starting"
+      : value === "unknown" || value === "starting" || value === "degraded"
         ? "badge-amber"
         : "badge-red"
   return <span className={`badge ${variant}`}>{state}</span>

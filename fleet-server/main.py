@@ -37,7 +37,7 @@ from schemas import (
     ArchiveRecordingOut, ArchivePlaybackRequest, ArchivePlaybackOut,
     AgentCameraSyncItem, AgentSiteConfigUpdate,
     TlsUpdateRequest, TlsStatus, TlsCertificateInfo,
-    StackStatus, StackServiceStatus, StackRestartRequest, StackRestartResult,
+    StackStatus, StackServiceStatus, StackIntegrationStatus, StackRestartRequest, StackRestartResult,
     StackLogsOut,
     BackupFileOut, BackupListOut, BackupRotateRequest, BackupRotateResult, BackupImportResult,
     SiteAgentDrainResult,
@@ -215,6 +215,21 @@ def _get_archive_semaphore(site_id: str, max_concurrent: int = 2) -> asyncio.Sem
 # traffic accumulators: site_id -> bytes this minute
 traffic_acc:   dict[str, int] = {}
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _validate_required_env() -> None:
+    required = [
+        "JWT_SECRET",
+        "MEDIAMTX_INTERNAL_PASS",
+        "MEDIAMTX_VIEWER_PASS",
+    ]
+    missing = [name for name in required if not os.environ.get(name, "").strip()]
+    if missing:
+        raise RuntimeError(
+            "Missing required environment variables: "
+            + ", ".join(missing)
+            + ". Refusing to start fleet-server with insecure or incomplete runtime configuration."
+        )
 
 
 def _tls_files_present() -> bool:
@@ -537,6 +552,120 @@ def _find_container_for_spec(containers: dict, spec: dict):
     return None
 
 
+def _integration_status(key: str, label: str, status: str, message: str = "", target: str = "") -> StackIntegrationStatus:
+    return StackIntegrationStatus(
+        key=key,
+        label=label,
+        status=status,
+        message=message,
+        target=target,
+    )
+
+
+def _mtx_toolkit_integration_statuses() -> list[StackIntegrationStatus]:
+    checks: list[StackIntegrationStatus] = []
+
+    if not MTX_TOOLKIT_SYNC_ENABLED:
+        checks.append(_integration_status(
+            "mtx-fleet-sync",
+            "MTX Fleet sync",
+            "disabled",
+            "MTX Toolkit sync loop is disabled by configuration.",
+            target=f"{MTX_TOOLKIT_API}/api/fleet/nodes?active_only=false",
+        ))
+        return checks
+
+    try:
+        health_payload = _mtx_toolkit_request("/api/health/")
+        if isinstance(health_payload, dict) and health_payload.get("status") == "ok":
+            checks.append(_integration_status(
+                "mtx-toolkit-api",
+                "MTX Toolkit API",
+                "ok",
+                "Toolkit API, database, Redis, and MediaMTX health checks passed.",
+                target=f"{MTX_TOOLKIT_API}/api/health/",
+            ))
+        else:
+            checks.append(_integration_status(
+                "mtx-toolkit-api",
+                "MTX Toolkit API",
+                "degraded",
+                json.dumps(health_payload, ensure_ascii=False) if health_payload is not None else "Unexpected empty health response.",
+                target=f"{MTX_TOOLKIT_API}/api/health/",
+            ))
+    except Exception as exc:
+        checks.append(_integration_status(
+            "mtx-toolkit-api",
+            "MTX Toolkit API",
+            "failing",
+            str(exc),
+            target=f"{MTX_TOOLKIT_API}/api/health/",
+        ))
+        checks.append(_integration_status(
+            "mtx-fleet-sync",
+            "MTX Fleet sync",
+            "failing",
+            "Skipped because MTX Toolkit API is unavailable.",
+            target=f"{MTX_TOOLKIT_API}/api/fleet/nodes?active_only=false",
+        ))
+        return checks
+
+    try:
+        payload = _mtx_toolkit_request("/api/fleet/nodes?active_only=false")
+        nodes = payload.get("nodes", []) if isinstance(payload, dict) else []
+        matched = None
+        for node in nodes:
+            if (
+                node.get("name") == MTX_TOOLKIT_NODE_NAME
+                or node.get("api_url") == MEDIAMTX_API
+                or node.get("rtsp_url") == MTX_TOOLKIT_RTSP_URL
+            ):
+                matched = node
+                break
+
+        if not matched:
+            checks.append(_integration_status(
+                "mtx-fleet-sync",
+                "MTX Fleet sync",
+                "failing",
+                "Toolkit API is reachable, but the expected MediaMTX node is missing.",
+                target=f"{MTX_TOOLKIT_API}/api/fleet/nodes?active_only=false",
+            ))
+        else:
+            healthy_streams = int(matched.get("healthy_streams") or 0)
+            degraded_streams = int(matched.get("degraded_streams") or 0)
+            unhealthy_streams = int(matched.get("unhealthy_streams") or 0)
+            stream_count = int(matched.get("stream_count") or 0)
+            is_active = bool(matched.get("is_active"))
+            if is_active and unhealthy_streams == 0:
+                status = "ok"
+            elif is_active:
+                status = "degraded"
+            else:
+                status = "failing"
+            checks.append(_integration_status(
+                "mtx-fleet-sync",
+                "MTX Fleet sync",
+                status,
+                (
+                    f"Node '{matched.get('name')}' active={is_active}, "
+                    f"streams healthy/degraded/unhealthy={healthy_streams}/{degraded_streams}/{unhealthy_streams}, "
+                    f"total={stream_count}."
+                ),
+                target=f"{MTX_TOOLKIT_API}/api/fleet/nodes?active_only=false",
+            ))
+    except Exception as exc:
+        checks.append(_integration_status(
+            "mtx-fleet-sync",
+            "MTX Fleet sync",
+            "failing",
+            str(exc),
+            target=f"{MTX_TOOLKIT_API}/api/fleet/nodes?active_only=false",
+        ))
+
+    return checks
+
+
 def _stack_status_payload() -> StackStatus:
     client, docker_message = _load_docker_client()
     docker_available = client is not None
@@ -608,6 +737,7 @@ def _stack_status_payload() -> StackStatus:
         docker_available=docker_available,
         docker_message=docker_message,
         services=services,
+        integrations=_mtx_toolkit_integration_statuses(),
     )
 
 
@@ -1303,6 +1433,7 @@ async def _sync_tunnel_listeners(db: Session) -> None:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    _validate_required_env()
     asyncio.create_task(_mtx_metrics_poll_loop())
     if MTX_TOOLKIT_SYNC_ENABLED:
         asyncio.create_task(_mtx_toolkit_sync_loop())
