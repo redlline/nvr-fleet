@@ -100,9 +100,19 @@ _ensure_db_schema()
 
 app = FastAPI(title="NVR Fleet Server", version="1.0.0")
 
+# Build CORS origin list from PUBLIC_HOST.
+# Falls back to ["*"] only if PUBLIC_HOST is unset (dev/test environments).
+def _cors_origins() -> list[str]:
+    host = os.environ.get("PUBLIC_HOST", "").strip()
+    if not host:
+        return ["*"]
+    origins = [f"https://{host}", f"http://{host}"]
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -162,9 +172,8 @@ def _check_site_access(user: "User", site_id: str) -> None:
     """Enforce site-level ACL. Admins see all. Others see only allowed_sites."""
     if user.role == "admin":
         return
-    import json as _j
     try:
-        allowed = _j.loads(user.allowed_sites or "[]")
+        allowed = json.loads(user.allowed_sites or "[]")
     except Exception:
         allowed = []
     if allowed and site_id not in allowed:
@@ -918,20 +927,6 @@ def _ensure_all_site_defaults(db: Session) -> bool:
     return changed
 
 
-def require_agent_site(
-    site_id: str,
-    x_agent_token: Optional[str] = Header(None, alias="X-Agent-Token"),
-    db: Session = Depends(get_db),
-) -> str:
-    if not x_agent_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing agent token")
-    agent = db.query(Agent).filter_by(site_id=site_id, token=x_agent_token).first()
-    if not agent:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token")
-    _ensure_site_exists(site_id, db)
-    return site_id
-
-
 class SiteTunnelManager:
     def __init__(self) -> None:
         self.listeners: dict[tuple[str, str], asyncio.AbstractServer] = {}
@@ -1098,6 +1093,21 @@ class SiteTunnelManager:
         for key in list(self.listeners):
             await self._close_listener(key)
 
+
+
+
+def require_agent_site(
+    site_id: str,
+    x_agent_token: Optional[str] = Header(None, alias="X-Agent-Token"),
+    db: Session = Depends(get_db),
+) -> str:
+    if not x_agent_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing agent token")
+    agent = db.query(Agent).filter_by(site_id=site_id, token=x_agent_token).first()
+    if not agent:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token")
+    _ensure_site_exists(site_id, db)
+    return site_id
 
 tunnel_manager = SiteTunnelManager()
 
@@ -1434,11 +1444,10 @@ async def call_agent(site_id: str, payload: dict, timeout: int = 20) -> dict:
 
 @app.get("/api/sites", response_model=list[SiteOut])
 def list_sites(db: Session = Depends(get_db), user=Depends(require_viewer)):
-    import json as _j
     sites = db.query(Site).all()
     if user.role != "admin":
         try:
-            allowed = _j.loads(user.allowed_sites or "[]")
+            allowed = json.loads(user.allowed_sites or "[]")
         except Exception:
             allowed = []
         if allowed:
@@ -2659,14 +2668,28 @@ async def _mtx_toolkit_sync_loop() -> None:
 _login_attempts: dict[str, list[float]] = {}
 _LOGIN_MAX_ATTEMPTS = 10
 _LOGIN_WINDOW_SECONDS = 300  # 5 minutes
+_LOGIN_CLEANUP_INTERVAL = 600  # clean stale IPs every 10 minutes
+_login_last_cleanup: float = 0.0
 
 
 def _check_login_rate_limit(client_ip: str) -> None:
-    """Block IPs that exceed _LOGIN_MAX_ATTEMPTS in _LOGIN_WINDOW_SECONDS."""
+    """Block IPs exceeding _LOGIN_MAX_ATTEMPTS in _LOGIN_WINDOW_SECONDS.
+    Periodically purges stale entries to prevent unbounded memory growth
+    under DDoS with many unique source IPs.
+    """
     import time as _time
+    global _login_last_cleanup
     now = _time.time()
+
+    # Periodic cleanup: remove IPs whose last attempt is older than the window
+    if now - _login_last_cleanup > _LOGIN_CLEANUP_INTERVAL:
+        stale = [ip for ip, ts_list in _login_attempts.items()
+                 if not any(now - t < _LOGIN_WINDOW_SECONDS for t in ts_list)]
+        for ip in stale:
+            del _login_attempts[ip]
+        _login_last_cleanup = now
+
     attempts = _login_attempts.get(client_ip, [])
-    # Expire old entries
     attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
     if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
         raise HTTPException(
@@ -2706,7 +2729,6 @@ def list_users(db: Session = Depends(get_db), _=Depends(require_admin)):
 
 @app.post("/api/users")
 def create_user(data: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
-    import json as _json
     username = (data.get("username") or "").strip()
     password = data.get("password", "")
     role     = data.get("role", "viewer")
@@ -2722,17 +2744,20 @@ def create_user(data: dict, db: Session = Depends(get_db), _=Depends(require_adm
         username=username,
         password_hash=_hash_password(password),
         role=role,
-        allowed_sites=_json.dumps(data.get("allowed_sites", [])),
+        allowed_sites=json.dumps(data.get("allowed_sites", [])),
     )
     db.add(u)
-    db.commit()
-    db.refresh(u)
+    try:
+        db.commit()
+        db.refresh(u)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, f"Failed to create user: {exc}") from exc
     return {"id": u.id, "username": u.username, "role": u.role}
 
 
 @app.put("/api/users/{user_id}")
 def update_user(user_id: int, data: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
-    import json as _json
     u = db.query(User).filter_by(id=user_id).first()
     if not u:
         raise HTTPException(404, "User not found")
@@ -2745,8 +2770,12 @@ def update_user(user_id: int, data: dict, db: Session = Depends(get_db), _=Depen
     if "is_active" in data:
         u.is_active = bool(data["is_active"])
     if "allowed_sites" in data:
-        u.allowed_sites = _json.dumps(data["allowed_sites"]) if isinstance(data["allowed_sites"], list)             else data["allowed_sites"]
-    db.commit()
+        u.allowed_sites = json.dumps(data["allowed_sites"]) if isinstance(data["allowed_sites"], list)             else data["allowed_sites"]
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, f"Failed to update user: {exc}") from exc
     return {"id": u.id, "username": u.username, "role": u.role, "is_active": u.is_active}
 
 
@@ -2760,6 +2789,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 
