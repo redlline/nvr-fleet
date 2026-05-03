@@ -51,7 +51,7 @@ export default function StreamsTab({ siteId, publicHost }) {
         <span className={`badge ${onlineCount > 0 ? "badge-green" : "badge-gray"}`}>
           {onlineCount} / {rows.length} live
         </span>
-        <button className="btn btn-ghost btn-sm" onClick={load}{t("refresh")}</button>
+        <button className="btn btn-ghost btn-sm" onClick={load}>{t("refresh")}</button>
       </div>
 
       <div className="table-wrap">
@@ -69,7 +69,7 @@ export default function StreamsTab({ siteId, publicHost }) {
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="empty-state"{t("noEnabledCameras")}</td></tr>
+              <tr><td colSpan={7} className="empty-state">{t("noEnabledCameras")}</</td></tr>
             )}
             {rows.map(({ camera, path, ready, updated, streamStat }) => {
               // rtsp_url comes from the server — it knows the real viewer credentials
@@ -142,5 +142,6 @@ function CopyField({ value, label }) {
     </button>
   )
 }
+
 
 

@@ -164,13 +164,13 @@ export default function ArchiveTab({ siteId, publicHost }) {
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <div className="form-row-3">
           <div className="form-group">
-            <label className="form-label"{t("camera")}</label>
+            <label className="form-label">{t("camera")}</label>
             <select
               className="form-input"
               value={filters.camera_id}
               onChange={(e) => setFilters((prev) => ({ ...prev, camera_id: e.target.value }))}
             >
-              <option value=""{t("allCameras")}</option>
+              <option value="">{t("allCameras")}</option>
               {cameras.map((camera) => (
                 <option key={camera.id} value={camera.id}>
                   CH {camera.channel} - {camera.name}
@@ -179,7 +179,7 @@ export default function ArchiveTab({ siteId, publicHost }) {
             </select>
           </div>
           <div className="form-group">
-            <label className="form-label"{t("start")}</label>
+            <label className="form-label">{t("start")}</label>
             <input
               className="form-input"
               type="datetime-local"
@@ -188,7 +188,7 @@ export default function ArchiveTab({ siteId, publicHost }) {
             />
           </div>
           <div className="form-group">
-            <label className="form-label"{t("end")}</label>
+            <label className="form-label">{t("end")}</label>
             <input
               className="form-input"
               type="datetime-local"
@@ -221,7 +221,7 @@ export default function ArchiveTab({ siteId, publicHost }) {
               <a className="btn btn-ghost btn-sm" href={session.webrtc_url} target="_blank" rel="noreferrer">
                 WebRTC
               </a>
-              <button className="btn btn-ghost btn-sm" onClick={stopSession}{t("stop")}</button>
+              <button className="btn btn-ghost btn-sm" onClick={stopSession}>{t("stop")}</button>
             </div>
           </div>
           <video
@@ -255,7 +255,7 @@ export default function ArchiveTab({ siteId, publicHost }) {
           </thead>
           <tbody>
             {recordings.length === 0 && (
-              <tr><td colSpan={6} className="empty-state"{t("noRecordings")}</td></tr>
+              <tr><td colSpan={6} className="empty-state">{t("noRecordings")}</</td></tr>
             )}
             {recordings.map((item) => (
               <tr key={`${item.camera_id}-${item.start}-${item.end}`}>
@@ -304,4 +304,5 @@ function CopyButton({ label, value }) {
     </button>
   )
 }
+
 

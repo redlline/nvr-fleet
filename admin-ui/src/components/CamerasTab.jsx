@@ -80,8 +80,8 @@ export default function CamerasTab({ siteId, site }) {
           {enabledCount} / {cameras.length} enabled
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => toggleAll(true)}{t("enableAll")}</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => toggleAll(false)}{t("disableAll")}</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => toggleAll(true)}>{t("enableAll")}</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => toggleAll(false)}>{t("disableAll")}</button>
           <button className="btn btn-ghost btn-sm" onClick={() => switchAllStream("main")}>All → Main</button>
           <button className="btn btn-ghost btn-sm" onClick={() => switchAllStream("sub")}>All → Sub</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowAdd(true)}>+ Add camera</button>
@@ -109,7 +109,7 @@ export default function CamerasTab({ siteId, site }) {
           </thead>
           <tbody>
             {cameras.length === 0 && (
-              <tr><td colSpan={7} className="empty-state"{t("noCamerasConfigured")}</td></tr>
+              <tr><td colSpan={7} className="empty-state">{t("noCamerasConfigured")}</</td></tr>
             )}
             {cameras.map(cam => {
               const name    = getVal(cam, "name")
@@ -211,7 +211,7 @@ function AddCameraModal({ onClose, onSave, existingChannels }) {
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 400 }}>
-        <div className="modal-title"{t("addCamera")}</div>
+        <div className="modal-title">{t("addCamera")}</</div>
         {error && <div className="alert alert-error">{error}</div>}
         <form onSubmit={submit}>
           <div className="form-group">
@@ -236,10 +236,10 @@ function AddCameraModal({ onClose, onSave, existingChannels }) {
               <input type="checkbox" checked={form.enabled} onChange={e => upd("enabled", e.target.checked)} />
               <div className="toggle-track" /><div className="toggle-thumb" />
             </label>
-            <span className="form-label" style={{ margin: 0 }}{t("camEnabled")}</span>
+            <span className="form-label" style={{ margin: 0 }}>{t("camEnabled")}</span>
           </div>
           <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose}{t("cancel")}</button>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>{t("cancel")}</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? <><span className="spinner" /> Adding...</> : t("addCamera")}
             </button>
@@ -249,4 +249,5 @@ function AddCameraModal({ onClose, onSave, existingChannels }) {
     </div>
   )
 }
+
 
