@@ -48,9 +48,11 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       DATABASE_URL: "sqlite:////app/data/fleet.db"
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      PUBLIC_WEB_SCHEME: ${PUBLIC_SCHEME:-}
       RTSP_PORT: "8554"
       MEDIAMTX_API_USER: "mediamtx-internal"
       MEDIAMTX_API_PASS: ${MEDIAMTX_INTERNAL_PASS}
+      MEDIAMTX_VIEWER_PASS: ${MEDIAMTX_VIEWER_PASS}
       MEDIAMTX_API: "http://mediamtx-internal:${MEDIAMTX_INTERNAL_PASS}@host.docker.internal:9997"
       MEDIAMTX_HLS_PROXY_TARGET: "http://host.docker.internal:8888"
       MEDIAMTX_YAML: "/app/mediamtx/mediamtx.yml"
