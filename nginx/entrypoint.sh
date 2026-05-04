@@ -12,6 +12,7 @@ cat > "$ACTIVE_CONF" <<EOF
 server {
     listen 80;
     server_name ${PUBLIC_HOST};
+    resolver 127.0.0.11 valid=5s ipv6=off;
 
     location / {
         proxy_pass http://nvr-admin-ui:80;
@@ -91,6 +92,7 @@ server {
 server {
     listen 443 ssl http2;
     server_name ${PUBLIC_HOST};
+    resolver 127.0.0.11 valid=5s ipv6=off;
 
     ssl_certificate     ${TLS_FULLCHAIN_PATH};
     ssl_certificate_key ${TLS_PRIVKEY_PATH};
