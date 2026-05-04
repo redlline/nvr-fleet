@@ -22,26 +22,26 @@ echo "== Login and get JWT =="
 LOGIN_JSON="$(curl -fsS -X POST "${BASE_URL}/api/auth/login" \
   -H "Content-Type: application/json" \
   -d "{\"username\":\"${USERNAME}\",\"password\":\"${PASSWORD}\"}")"
-TOKEN="$(python -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")"
+TOKEN="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")"
 echo "login ok for ${USERNAME}"
 
 echo
 echo "== /api/auth/me =="
 curl -fsS "${BASE_URL}/api/auth/me" \
-  -H "Authorization: Bearer ${TOKEN}" | python -m json.tool
+  -H "Authorization: Bearer ${TOKEN}" | python3 -m json.tool
 
 echo
 echo "== /api/system/stack =="
 curl -fsS "${BASE_URL}/api/system/stack" \
-  -H "Authorization: Bearer ${TOKEN}" | python -m json.tool
+  -H "Authorization: Bearer ${TOKEN}" | python3 -m json.tool
 
 echo
 echo "== MTX Toolkit health =="
-curl -fsS "${TOOLKIT_API_URL}/api/health/" | python -m json.tool
+curl -fsS "${TOOLKIT_API_URL}/api/health/" | python3 -m json.tool
 
 echo
 echo "== MTX Toolkit fleet nodes =="
-curl -fsS -u "${TOOLKIT_USER}:${TOOLKIT_PASSWORD}" "${TOOLKIT_API_URL}/api/fleet/nodes?active_only=false" | python -m json.tool
+curl -fsS -u "${TOOLKIT_USER}:${TOOLKIT_PASSWORD}" "${TOOLKIT_API_URL}/api/fleet/nodes?active_only=false" | python3 -m json.tool
 
 echo
 echo "Smoke check complete."

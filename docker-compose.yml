@@ -56,6 +56,7 @@ services:
       MEDIAMTX_VIEWER_PASS: ${MEDIAMTX_VIEWER_PASS}
       MEDIAMTX_API: "http://mediamtx-internal:${MEDIAMTX_INTERNAL_PASS}@host.docker.internal:9997"
       MEDIAMTX_HLS_PROXY_TARGET: "http://host.docker.internal:8888"
+      MTX_TOOLKIT_API: "http://host.docker.internal:5002"
       MEDIAMTX_YAML: "/app/mediamtx/mediamtx.yml"
       TUNNEL_HTTP_START: "20080"
       TUNNEL_HTTP_END: "20179"

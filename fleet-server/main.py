@@ -2747,9 +2747,13 @@ def _ensure_mtx_toolkit_node() -> Optional[int]:
         return None
 
     nodes = payload.get("nodes", []) if isinstance(payload, dict) else []
+    # Use clean MediaMTX API URL without embedded credentials for stable node matching.
+    # MTX Toolkit stores api_url and matches by it — if the password changes between
+    # restarts, the URL changes and the node is re-created as a duplicate.
+    _mediamtx_api_clean = f"http://host.docker.internal:{os.environ.get('MEDIAMTX_API_PORT', '9997')}"
     node_data = {
         "name": MTX_TOOLKIT_NODE_NAME,
-        "api_url": MEDIAMTX_API,
+        "api_url": _mediamtx_api_clean,
         "rtsp_url": MTX_TOOLKIT_RTSP_URL,
         "environment": MTX_TOOLKIT_ENVIRONMENT,
         "is_active": True,
@@ -2758,7 +2762,7 @@ def _ensure_mtx_toolkit_node() -> Optional[int]:
     for node in nodes:
         if (
             node.get("name") == MTX_TOOLKIT_NODE_NAME
-            or node.get("api_url") == MEDIAMTX_API
+            or node.get("api_url") == _mediamtx_api_clean
             or node.get("rtsp_url") == MTX_TOOLKIT_RTSP_URL
         ):
             node_id = int(node["id"])
@@ -2908,6 +2912,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current=Depends(req
     db.delete(u)
     db.commit()
     return {"status": "deleted"}
+
 
 
 
