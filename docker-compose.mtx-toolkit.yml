@@ -45,12 +45,10 @@ services:
     volumes:
       - /var/recordings:/recordings
     depends_on:
-      - mtx-toolkit-postgres
-      - mtx-toolkit-redis
-    networks:
-      default:
-        aliases:
-          - backend
+      mtx-toolkit-postgres:
+        condition: service_healthy
+      mtx-toolkit-redis:
+        condition: service_started
 
   mtx-toolkit-frontend:
     profiles: [build]
@@ -84,6 +82,12 @@ services:
       - "15433:5432"
     volumes:
       - mtx_toolkit_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mtx -d mtx_toolkit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   mtx-toolkit-redis:
     image: redis:7-alpine
@@ -117,8 +121,10 @@ services:
     volumes:
       - /var/recordings:/recordings
     depends_on:
-      - mtx-toolkit-postgres
-      - mtx-toolkit-redis
+      mtx-toolkit-postgres:
+        condition: service_healthy
+      mtx-toolkit-redis:
+        condition: service_started
 
   mtx-toolkit-celery-beat:
     profiles: [build]
@@ -133,8 +139,10 @@ services:
       DATABASE_URL: postgresql://mtx:mtx_password@mtx-toolkit-postgres:5432/mtx_toolkit
       REDIS_URL: redis://mtx-toolkit-redis:6379/0
     depends_on:
-      - mtx-toolkit-postgres
-      - mtx-toolkit-redis
+      mtx-toolkit-postgres:
+        condition: service_healthy
+      mtx-toolkit-redis:
+        condition: service_started
 
 volumes:
   mtx_toolkit_pg_data:

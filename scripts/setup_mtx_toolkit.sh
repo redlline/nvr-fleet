@@ -72,6 +72,15 @@ patch_text(
     '        parsed = urlparse(node_api_url)\n'
     '        return f"http://{parsed.hostname}:{HLS_PORT}/{stream_path}/index.m3u8"\n',
 )
+
+# Fix: cascade delete streams when a node is deleted.
+# Without this, deleting a node raises IntegrityError because Stream.node_id is NOT NULL
+# and SQLAlchemy tries to SET NULL instead of DELETE the child rows.
+patch_text(
+    "backend/app/models/stream.py",
+    '    streams = db.relationship("Stream", backref="node", lazy="dynamic")',
+    '    streams = db.relationship("Stream", backref="node", lazy="dynamic", cascade="all, delete-orphan")',
+)
 PY
 
 echo "MTX Toolkit source is ready in: ${ADDON_DIR}"
