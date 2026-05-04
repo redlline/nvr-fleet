@@ -22,26 +22,33 @@ echo "== Login and get JWT =="
 LOGIN_JSON="$(curl -fsS -X POST "${BASE_URL}/api/auth/login" \
   -H "Content-Type: application/json" \
   -d "{\"username\":\"${USERNAME}\",\"password\":\"${PASSWORD}\"}")"
-TOKEN="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")"
+# Parse token: try jq first, fall back to python3, then python
+if command -v jq &>/dev/null; then
+  TOKEN="$(echo "$LOGIN_JSON" | jq -r '.token')"
+elif command -v python3 &>/dev/null; then
+  TOKEN="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")"
+else
+  TOKEN="$(python -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")"
+fi
 echo "login ok for ${USERNAME}"
 
 echo
 echo "== /api/auth/me =="
 curl -fsS "${BASE_URL}/api/auth/me" \
-  -H "Authorization: Bearer ${TOKEN}" | python3 -m json.tool
+  -H "Authorization: Bearer ${TOKEN}" | (command -v jq &>/dev/null && jq . || python3 -m json.tool 2>/dev/null || cat)
 
 echo
 echo "== /api/system/stack =="
 curl -fsS "${BASE_URL}/api/system/stack" \
-  -H "Authorization: Bearer ${TOKEN}" | python3 -m json.tool
+  -H "Authorization: Bearer ${TOKEN}" | (command -v jq &>/dev/null && jq . || python3 -m json.tool 2>/dev/null || cat)
 
 echo
 echo "== MTX Toolkit health =="
-curl -fsS "${TOOLKIT_API_URL}/api/health/" | python3 -m json.tool
+curl -fsS "${TOOLKIT_API_URL}/api/health/" | (command -v jq &>/dev/null && jq . || python3 -m json.tool 2>/dev/null || cat)
 
 echo
 echo "== MTX Toolkit fleet nodes =="
-curl -fsS -u "${TOOLKIT_USER}:${TOOLKIT_PASSWORD}" "${TOOLKIT_API_URL}/api/fleet/nodes?active_only=false" | python3 -m json.tool
+curl -fsS -u "${TOOLKIT_USER}:${TOOLKIT_PASSWORD}" "${TOOLKIT_API_URL}/api/fleet/nodes?active_only=false" | (command -v jq &>/dev/null && jq . || python3 -m json.tool 2>/dev/null || cat)
 
 echo
 echo "Smoke check complete."
