@@ -610,6 +610,24 @@ def _mtx_toolkit_integration_statuses() -> list[StackIntegrationStatus]:
         ))
         return checks
 
+    # Only check for a registered node when sites exist — before any site is created
+    # there is intentionally no node in MTX Toolkit Fleet.
+    db_check = SessionLocal()
+    try:
+        has_sites = db_check.query(Site).first() is not None
+    finally:
+        db_check.close()
+
+    if not has_sites:
+        checks.append(_integration_status(
+            "mtx-fleet-sync",
+            "MTX Fleet sync",
+            "ok",
+            "No sites configured yet — node will be registered automatically when first site is created.",
+            target=f"{MTX_TOOLKIT_API}/api/fleet/nodes?active_only=false",
+        ))
+        return checks
+
     try:
         payload = _mtx_toolkit_request("/api/fleet/nodes?active_only=false")
         nodes = payload.get("nodes", []) if isinstance(payload, dict) else []
