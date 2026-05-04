@@ -40,6 +40,7 @@ services:
     depends_on:
       - mediamtx
     ports:
+      - "127.0.0.1:8765:8765"  # local smoke-check access only
       - "20080-20179:20080-20179"
       - "25554-25653:25554-25653"
       - "28000-28099:28000-28099"
