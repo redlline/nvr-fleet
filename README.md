@@ -198,42 +198,19 @@ MTX_UI_USER=admin
 MTX_UI_PASSWORD=toolkit_password
 ```
 
-> **Генерация случайных паролей:**
-> ```bash
-> openssl rand -hex 32
-> ```
+> **Генерация случайных паролей:** `openssl rand -hex 32`
 
-### Шаг 3. Запустить стек
+### Шаг 3. Запустить установку
 
-```bash
-docker compose up -d
-```
-
-Проверить что все контейнеры поднялись:
+Один скрипт делает всё: проверяет Docker, поднимает основной стек, устанавливает и запускает MTX Toolkit, регистрирует ноду MediaMTX в Fleet, настраивает SSL.
 
 ```bash
-docker compose ps
+bash scripts/setup_vps.sh
 ```
 
-Ожидаемый вывод — все сервисы в статусе `running`:
+> Повторный запуск безопасен — скрипт идемпотентен.
 
-```
-NAME               STATUS
-mediamtx           running
-fleet-server       running
-nvr-nginx          running
-nvr-admin-ui       running
-```
-
-### Шаг 4. Настроить SSL (HTTPS)
-
-```bash
-bash scripts/setup_ssl.sh
-```
-
-Скрипт автоматически получит Let's Encrypt сертификат для домена из `PUBLIC_HOST`.
-
-### Шаг 5. Войти в панель
+### Шаг 4. Войти в панель
 
 Откройте `https://nvr.yourdomain.com` в браузере.
 
@@ -242,78 +219,36 @@ bash scripts/setup_ssl.sh
 
 > После первого входа смените пароль через **System → Users → Edit**.
 
+> **Нода MediaMTX** в MTX Toolkit Fleet регистрируется автоматически — fleet-server подключается к MTX Toolkit при старте и каждые несколько секунд синхронизирует стримы. Ручная регистрация через curl не нужна.
+
 ---
 
 ## MTX Toolkit Fleet
 
-MTX Toolkit — дополнительный интерфейс управления MediaMTX потоками (порт `:3001`). Fleet — раздел который показывает ноды MediaMTX.
+MTX Toolkit — дополнительный интерфейс управления MediaMTX потоками (порт `:3001`).
 
-### Запуск MTX Toolkit
+Запускается автоматически через `bash scripts/setup_vps.sh`. Нода MediaMTX регистрируется в Fleet без каких-либо ручных действий — fleet-server подключается к MTX Toolkit при старте и синхронизирует стримы каждые несколько секунд.
+
+### Диагностика (если что-то не работает)
 
 ```bash
-# Запустить вместе с основным стеком одной командой:
-docker compose -f docker-compose.mtx-toolkit.yml --profile build up -d
-
-# Проверить что все 4 контейнера запустились:
+# Статус всех контейнеров Toolkit
 docker compose -f docker-compose.mtx-toolkit.yml ps
-```
 
-Ожидаемый вывод:
-
-```
-NAME                      STATUS
-mtx-toolkit-backend       running
-mtx-toolkit-frontend      running
-mtx-toolkit-postgres      running
-mtx-toolkit-redis         running
-```
-
-> ⚠️ Все четыре контейнера должны запускаться **одной командой** — иначе они попадут в разные Docker-сети и backend не найдёт postgres.
-
-### Регистрация ноды в Fleet
-
-После запуска MTX Toolkit нода регистрируется автоматически при следующем перезапуске fleet-server. Или вручную:
-
-```bash
-source /opt/NVR-Fleet/.env
-
-# Зарегистрировать/обновить ноду
-curl -X PUT http://127.0.0.1:5002/api/fleet/nodes/1 \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"name\": \"MediaMTX ${PUBLIC_HOST}\",
-    \"api_url\": \"http://mediamtx-internal:${MEDIAMTX_INTERNAL_PASS}@host.docker.internal:9997\",
-    \"rtsp_url\": \"rtsp://viewer:${MEDIAMTX_VIEWER_PASS}@host.docker.internal:8554\",
-    \"environment\": \"production\",
-    \"is_active\": true
-  }"
-
-# Синхронизировать стримы
-curl -X POST http://127.0.0.1:5002/api/fleet/nodes/1/sync \
-  -H "Content-Type: application/json" -d "{}"
-```
-
-> **Важно:** в `api_url` и `rtsp_url` используйте `host.docker.internal` — это позволяет контейнеру mtx-toolkit-backend обращаться к MediaMTX на хосте. Не используйте `127.0.0.1` — это адрес самого контейнера.
-
-### Проверка здоровья
-
-```bash
+# Здоровье backend
 curl -s http://127.0.0.1:5002/api/health/ | python3 -m json.tool
+
+# Список нод в Fleet
+curl -s http://127.0.0.1:5002/api/fleet/nodes?active_only=false | python3 -m json.tool
+
+# Логи backend
+docker logs mtx-toolkit-backend --tail=30
 ```
 
-Ожидаемый ответ:
-
-```json
-{
-  "checks": {
-    "database": "ok",
-    "mediamtx": "ok",
-    "redis": "ok"
-  },
-  "service": "mtx-toolkit",
-  "status": "ok"
-}
-```
+> ⚠️ Если поднимать Toolkit вручную, все контейнеры должны стартовать **одной командой** — иначе они попадут в разные Docker-сети:
+> ```bash
+> docker compose -f docker-compose.mtx-toolkit.yml --profile build up -d
+> ```
 
 ---
 
