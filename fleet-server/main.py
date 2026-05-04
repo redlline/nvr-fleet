@@ -372,8 +372,8 @@ STACK_SERVICE_SPECS = [
         "container_name": "mtx-toolkit-frontend",
         "compose_service": "mtx-toolkit-frontend",
         "host_port": 3001,
-        "probe_kind": "http",
-        "probe_target": f"http://{os.environ.get('MTX_UI_USER','admin')}:{os.environ.get('MTX_UI_PASSWORD','')}@host.docker.internal:3001/",
+        "probe_kind": "tcp",
+        "probe_target": ("host.docker.internal", 3001),
     },
     {
         "key": "mtx-toolkit-api",

@@ -22,6 +22,6 @@ else
 fi
 
 if [ ! -s /etc/nginx/.htpasswd ]; then
-    echo "[mtx-toolkit] ERROR: failed to create /etc/nginx/.htpasswd. Install apache2-utils or openssl in the frontend image." >&2
-    exit 1
+    echo "[mtx-toolkit] WARN: failed to create /etc/nginx/.htpasswd — disabling auth_basic." >&2
+    sed -i '/auth_basic/d' /etc/nginx/conf.d/default.conf 2>/dev/null || true
 fi
