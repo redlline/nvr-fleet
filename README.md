@@ -14,7 +14,11 @@
 
 - [Что это](#что-это)
 - [Архитектура](#архитектура)
+- [Требования к серверу](#требования-к-серверу)
+- [Установка зависимостей (VPS)](#установка-зависимостей-vps)
 - [Быстрый старт](#быстрый-старт)
+- [MTX Toolkit Fleet](#mtx-toolkit-fleet)
+- [Установка агента на мини-ПК](#установка-агента-на-мини-пк)
 - [Роли пользователей](#роли-пользователей)
 - [Поддерживаемые NVR](#поддерживаемые-nvr)
 - [MTX Toolkit](#mtx-toolkit)
@@ -57,56 +61,326 @@
 
 ---
 
-## Быстрый старт
+## Требования к серверу
 
-### Требования
+### VPS (сервер)
 
-- VPS: Ubuntu 20.04+, Docker, Docker Compose v2
-- Мини-ПК на площадке: Linux, Python 3.10+
+| Параметр | Минимум | Рекомендуется |
+|----------|---------|---------------|
+| ОС | Ubuntu 20.04+ / Debian 11+ | Ubuntu 22.04 LTS |
+| CPU | 1 vCPU | 2 vCPU |
+| RAM | 1 ГБ | 4 ГБ |
+| Диск | 20 ГБ | 40 ГБ SSD |
+| Сеть | 100 Мбит/с | 1 Гбит/с |
+| Docker | 24.0+ | latest |
+| Docker Compose | v2.20+ | latest |
 
-### Установка на VPS
+**Открытые порты:**
+
+| Порт | Протокол | Назначение |
+|------|----------|------------|
+| 80 | TCP | HTTP → редирект на HTTPS |
+| 443 | TCP | HTTPS (Nginx, основной UI) |
+| 8554 | TCP | RTSP (MediaMTX, приём от агентов) |
+| 8888 | TCP | HLS (MediaMTX, опционально) |
+| 3001 | TCP | MTX Toolkit UI (опционально, можно закрыть) |
+
+### Мини-ПК на площадке
+
+| Параметр | Минимум |
+|----------|---------|
+| ОС | Linux (Ubuntu 20.04+ / Armbian / OpenWrt + Python) |
+| CPU | x86-64 или ARM64 |
+| RAM | 512 МБ |
+| Python | 3.10+ |
+| Сеть | Доступ в интернет (исходящий TCP 443, 8554) |
+
+---
+
+## Установка зависимостей (VPS)
+
+> Выполняется один раз на чистом сервере перед установкой NVR Fleet.
+
+### 1. Обновить систему
 
 ```bash
-git clone https://github.com/redlline/NVR-Fleet
-cd NVR-Fleet
-cp .env.example .env
-# Отредактировать .env: ADMIN_TOKEN, PUBLIC_HOST, пароли
-nano .env
+apt update && apt upgrade -y
+apt install -y curl git nano htop
+```
 
+### 2. Установить Docker
+
+> ⚠️ Не используйте `apt install docker.io` или `snap install docker` — это устаревшие версии. Устанавливайте официальным скриптом:
+
+```bash
+curl -fsSL https://get.docker.com | sh
+```
+
+Добавить текущего пользователя в группу docker (чтобы не нужен был sudo):
+
+```bash
+usermod -aG docker $USER
+newgrp docker   # применить без перелогина
+```
+
+Проверить:
+
+```bash
+docker --version          # должно быть 24.0+
+docker compose version    # должно быть v2.20+
+```
+
+### 3. Включить автозапуск Docker
+
+```bash
+systemctl enable docker
+systemctl start docker
+```
+
+### 4. Настроить домен (DNS)
+
+Создайте A-запись у вашего DNS-провайдера:
+
+```
+nvr.yourdomain.com  →  IP_вашего_VPS
+```
+
+Проверить что DNS резолвится:
+
+```bash
+ping nvr.yourdomain.com
+```
+
+### 5. Убедиться что git установлен
+
+```bash
+git --version   # если нет: apt install -y git
+```
+
+---
+
+## Быстрый старт
+
+### Шаг 1. Клонировать репозиторий
+
+```bash
+git clone https://github.com/redlline/NVR-Fleet /opt/NVR-Fleet
+cd /opt/NVR-Fleet
+```
+
+### Шаг 2. Настроить переменные окружения
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Минимальный `.env` для запуска:
+
+```env
+# Публичный домен вашего VPS (без https://)
+PUBLIC_HOST=nvr.yourdomain.com
+
+# Токен администратора (используется как начальный пароль admin)
+ADMIN_TOKEN=ваш_сложный_токен_здесь
+
+# JWT секрет (любая случайная строка ≥32 символа)
+JWT_SECRET=случайная_строка_минимум_32_символа
+
+# Пароль viewer для RTSP/HLS (read-only доступ к стримам)
+MEDIAMTX_VIEWER_PASS=viewer_password
+
+# Пароль для внутреннего API MediaMTX
+MEDIAMTX_INTERNAL_PASS=internal_api_password
+
+# MTX Toolkit UI (порт 3001)
+MTX_UI_USER=admin
+MTX_UI_PASSWORD=toolkit_password
+```
+
+> **Генерация случайных паролей:**
+> ```bash
+> openssl rand -hex 32
+> ```
+
+### Шаг 3. Запустить стек
+
+```bash
 docker compose up -d
 ```
 
-### Установка агента на мини-ПК
+Проверить что все контейнеры поднялись:
 
 ```bash
-# Скачать скрипт установки с вашего VPS
-curl -s https://nvr.yourserver.com/install.sh | bash
+docker compose ps
+```
 
-# Или вручную (без install.sh):
+Ожидаемый вывод — все сервисы в статусе `running`:
+
+```
+NAME               STATUS
+mediamtx           running
+fleet-server       running
+nvr-nginx          running
+nvr-admin-ui       running
+```
+
+### Шаг 4. Настроить SSL (HTTPS)
+
+```bash
+bash scripts/setup_ssl.sh
+```
+
+Скрипт автоматически получит Let's Encrypt сертификат для домена из `PUBLIC_HOST`.
+
+### Шаг 5. Войти в панель
+
+Откройте `https://nvr.yourdomain.com` в браузере.
+
+- Логин: `admin`
+- Пароль: значение `ADMIN_TOKEN` из `.env`
+
+> После первого входа смените пароль через **System → Users → Edit**.
+
+---
+
+## MTX Toolkit Fleet
+
+MTX Toolkit — дополнительный интерфейс управления MediaMTX потоками (порт `:3001`). Fleet — раздел который показывает ноды MediaMTX.
+
+### Запуск MTX Toolkit
+
+```bash
+# Запустить вместе с основным стеком одной командой:
+docker compose -f docker-compose.mtx-toolkit.yml --profile build up -d
+
+# Проверить что все 4 контейнера запустились:
+docker compose -f docker-compose.mtx-toolkit.yml ps
+```
+
+Ожидаемый вывод:
+
+```
+NAME                      STATUS
+mtx-toolkit-backend       running
+mtx-toolkit-frontend      running
+mtx-toolkit-postgres      running
+mtx-toolkit-redis         running
+```
+
+> ⚠️ Все четыре контейнера должны запускаться **одной командой** — иначе они попадут в разные Docker-сети и backend не найдёт postgres.
+
+### Регистрация ноды в Fleet
+
+После запуска MTX Toolkit нода регистрируется автоматически при следующем перезапуске fleet-server. Или вручную:
+
+```bash
+source /opt/NVR-Fleet/.env
+
+# Зарегистрировать/обновить ноду
+curl -X PUT http://127.0.0.1:5002/api/fleet/nodes/1 \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"name\": \"MediaMTX ${PUBLIC_HOST}\",
+    \"api_url\": \"http://mediamtx-internal:${MEDIAMTX_INTERNAL_PASS}@host.docker.internal:9997\",
+    \"rtsp_url\": \"rtsp://viewer:${MEDIAMTX_VIEWER_PASS}@host.docker.internal:8554\",
+    \"environment\": \"production\",
+    \"is_active\": true
+  }"
+
+# Синхронизировать стримы
+curl -X POST http://127.0.0.1:5002/api/fleet/nodes/1/sync \
+  -H "Content-Type: application/json" -d "{}"
+```
+
+> **Важно:** в `api_url` и `rtsp_url` используйте `host.docker.internal` — это позволяет контейнеру mtx-toolkit-backend обращаться к MediaMTX на хосте. Не используйте `127.0.0.1` — это адрес самого контейнера.
+
+### Проверка здоровья
+
+```bash
+curl -s http://127.0.0.1:5002/api/health/ | python3 -m json.tool
+```
+
+Ожидаемый ответ:
+
+```json
+{
+  "checks": {
+    "database": "ok",
+    "mediamtx": "ok",
+    "redis": "ok"
+  },
+  "service": "mtx-toolkit",
+  "status": "ok"
+}
+```
+
+---
+
+## Установка агента на мини-ПК
+
+Выполняется на каждом мини-ПК на площадке.
+
+### Требования на мини-ПК
+
+```bash
+# Ubuntu / Debian
+apt update
+apt install -y python3 python3-pip python3-venv curl git
+
+# Проверить версию Python (нужно 3.10+)
+python3 --version
+```
+
+### Автоматическая установка
+
+```bash
+curl -fsSL https://nvr.yourdomain.com/install.sh | bash
+```
+
+### Ручная установка
+
+```bash
 mkdir -p /opt/nvr-fleet-agent && cd /opt/nvr-fleet-agent
-curl -fsSL https://nvr.yourserver.com/agent/agent.py -o agent.py
+
+curl -fsSL https://nvr.yourdomain.com/agent/agent.py -o agent.py
+
 python3 -m venv .venv
 .venv/bin/pip install --quiet websockets pyyaml fastapi uvicorn
 
-# Создать /etc/nvr-fleet-agent.env с переменными:
-# SITE_ID, AGENT_TOKEN, SERVER_HOST, SERVER_WS, SERVER_API
-# (generate с сервера через deploy config или вручную)
+cat > /etc/nvr-fleet-agent.env << 'EOF'
+SITE_ID=site001
+AGENT_TOKEN=ваш_ADMIN_TOKEN_с_сервера
+SERVER_HOST=nvr.yourdomain.com
+SERVER_WS=wss://nvr.yourdomain.com/ws
+SERVER_API=https://nvr.yourdomain.com/api
+EOF
 
 .venv/bin/python agent.py
 ```
 
-### Зависимости admin-ui (для разработки)
+### Автозапуск агента (systemd)
 
 ```bash
-cd admin-ui
-npm install
-npm run dev
-```
+cat > /etc/systemd/system/nvr-fleet-agent.service << 'EOF'
+[Unit]
+Description=NVR Fleet Agent
+After=network.target
 
-> **Windows / Node ESM note:** `npm run build` использует `--configLoader native` (Vite 8+).
-> Если сборка падает в Windows PowerShell с ESM-ошибкой, запустите напрямую:
-> `npx vite build` или используйте WSL2 / Git Bash.
-> Флаг `--configLoader native` нужен для корректной работы с `vite.config.js` в ESM-режиме.
+[Service]
+EnvironmentFile=/etc/nvr-fleet-agent.env
+ExecStart=/opt/nvr-fleet-agent/.venv/bin/python /opt/nvr-fleet-agent/agent.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable nvr-fleet-agent
+systemctl start nvr-fleet-agent
+```
 
 ---
 
@@ -145,18 +419,13 @@ npm run dev
 
 **Защита паролем:**
 ```bash
-# Установить логин/пароль в .env
-MTX_UI_USER=admin
-MTX_UI_PASSWORD=yourpassword
-
-# Создать .htpasswd и перезапустить
 docker exec mtx-toolkit-frontend sh -c \
   'apk add --no-cache apache2-utils && htpasswd -bc /etc/nginx/.htpasswd $MTX_UI_USER $MTX_UI_PASSWORD'
 docker compose -f docker-compose.mtx-toolkit.yml restart mtx-toolkit-frontend
 ```
 
+> `.htpasswd` хранится в памяти контейнера — пересоздаётся после `docker compose down`. Пароль берётся из переменных окружения.
 
-> `.htpasswd` хранится в памяти контейнера — пересоздаётся после `docker compose down`. Пароль берётся из переменных окружения. Автоматическое создание через `entrypoint.sh` монтируется через volume.
 ---
 
 ## Брендинг и локализация
@@ -167,49 +436,25 @@ docker compose -f docker-compose.mtx-toolkit.yml restart mtx-toolkit-frontend
 
 ```javascript
 const BRAND = {
-  name:      "Ваше название",     // заголовок в сайдбаре
-  logoIcon:  "/logo.png",          // путь к файлу public/logo.png
+  name:      "Ваше название",
+  logoIcon:  "/logo.png",
   copyright: "© 2026 Ваша компания",
 }
 ```
 
-**Кастомный логотип**: поместите файл в `admin-ui/public/logo.png` и укажите `"/logo.png"` в `logoIcon`.
+**Кастомный логотип**: поместите файл в `admin-ui/public/logo.png`.
 
 ### Языки интерфейса
 
 Переключатель **EN / RU / TK** расположен внизу сайдбара.
 
-Для добавления нового языка — добавьте объект в `translations` в `admin-ui/src/lib/i18n.js`:
-
-```javascript
-de: {
-  dashboard: "Dashboard",
-  sites: "Standorte",
-  // ...
-}
-```
+Для добавления нового языка — добавьте объект в `translations` в `admin-ui/src/lib/i18n.js`.
 
 ---
 
 ## Производительность
 
 > Замеры: VPS Hetzner CX22 (2 vCPU / 4 ГБ), мини-ПК Intel N100, H.264 1080p@25fps
-
-### Один туннель
-
-| Транспорт | Битрейт | CPU агент | CPU VPS | Задержка |
-|-----------|---------|-----------|---------|----------|
-| WS over TLS | 4 Мбит/с | ~1.2% | ~0.8% | +2–5 мс |
-| WS over TLS | 8 Мбит/с | ~2.1% | ~1.4% | +2–5 мс |
-| Прямой RTSP | 4 Мбит/с | ~0.3% | — | baseline |
-
-### Агент: 4 потока × 4 Мбит/с
-
-| Компонент | CPU |
-|-----------|-----|
-| go2rtc (RTSP ingest) | ~4–6% |
-| fleet-agent (WS + stats) | ~1.5–2% |
-| **Итого** | **~6–8%** |
 
 ### VPS: 10 площадок × 2 потока × 4 Мбит/с
 
@@ -235,9 +480,6 @@ de: {
 ```env
 DATABASE_URL=postgresql://fleet:password@postgres:5432/fleet
 ```
-SQLAlchemy-модели совместимы без изменений кода.
-
-**Шардирование MediaMTX**: fleet-server хранит `mtx_endpoint` per site. При >100 площадок запустите несколько инстансов MediaMTX и назначайте площадки вручную через Edit Site.
 
 ---
 
@@ -245,10 +487,10 @@ SQLAlchemy-модели совместимы без изменений кода.
 
 | Ограничение | Детали |
 |-------------|--------|
-| UDP-туннель | Не поддерживается. Только TCP. WS-Discovery (UDP 3702) не работает |
+| UDP-туннель | Не поддерживается. WS-Discovery (UDP 3702) не работает |
 | RTSP шифрование | Порт 8554 — plaintext. HLS/WebRTC идут через Nginx (TLS) |
-| SQLite | WAL mode. При >100 площадок возможны блокировки — переходите на PostgreSQL |
-| Archive concurrent | Макс. 2 одновременных сессии архива на площадку (лимит NVR ISAPI/ONVIF) |
+| SQLite | WAL mode. При >100 площадок переходите на PostgreSQL |
+| Archive concurrent | Макс. 2 одновременных сессии архива на площадку |
 | MediaMTX per instance | ~200–300 RTSP путей при 4 Мбит/с каждый |
 
 ---
@@ -256,7 +498,7 @@ SQLAlchemy-модели совместимы без изменений кода.
 ## Разработка
 
 ```bash
-# Backend (fleet-server/requirements.txt exists)
+# Backend
 cd fleet-server
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8765
@@ -265,31 +507,22 @@ uvicorn main:app --reload --port 8765
 cd admin-ui
 npm install
 npm run dev
-# Windows / Node ESM fallback if npm run build fails: npx vite build
-
-# Агент устанавливается только через scripts/install.sh (fleet-agent/requirements.txt не существует)
-# Для локального запуска агента вручную:
-pip install websockets pyyaml fastapi uvicorn
-python fleet-agent/agent.py
+# Windows ESM fallback: npx vite build
 ```
 
 ### Переменные окружения (.env)
 
-| Переменная | По умолчанию | Описание |
-|-----------|-------------|----------|
-| `ADMIN_TOKEN` | (required, no default) | Токен аутентификации агентов. Если не задан — эфемерный с WARNING. |
-| `JWT_SECRET` | (required, no default) | Независимый секрет подписи JWT. Если не задан — эфемерный: сессии сбрасываются при рестарте. |
-| `MEDIAMTX_VIEWER_PASS` | (required) | Read-only пароль viewer для RTSP/HLS в MediaMTX. |
-| `PUBLIC_HOST` | `localhost` | Публичный домен VPS |
-| `DATABASE_URL` | SQLite | URL базы данных |
-| `MTX_UI_USER` | `admin` | Логин MTX Toolkit |
-| `MTX_UI_PASSWORD` | (required, no default) | Пароль MTX Toolkit (nginx basic auth на порту 3001) |
+| Переменная | Описание |
+|-----------|----------|
+| `ADMIN_TOKEN` | Токен агентов и начальный пароль admin (обязательно) |
+| `JWT_SECRET` | Секрет подписи JWT (обязательно, иначе сессии сбрасываются при рестарте) |
+| `MEDIAMTX_VIEWER_PASS` | Read-only пароль viewer для RTSP/HLS (обязательно) |
+| `MEDIAMTX_INTERNAL_PASS` | Пароль внутреннего API MediaMTX порт 9997 (обязательно) |
+| `PUBLIC_HOST` | Публичный домен VPS без https:// (обязательно) |
+| `DATABASE_URL` | URL базы данных (по умолчанию SQLite) |
+| `MTX_UI_USER` | Логин MTX Toolkit (по умолчанию `admin`) |
+| `MTX_UI_PASSWORD` | Пароль MTX Toolkit (обязательно) |
 
 ---
 
 *Проект активно развивается. Issues и PR приветствуются.*
-
-
-
-
-
