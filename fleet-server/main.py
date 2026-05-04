@@ -2781,6 +2781,19 @@ def _ensure_mtx_toolkit_node() -> Optional[int]:
 
 
 def _sync_mtx_toolkit_node_streams() -> None:
+    # Only register/sync the MTX Toolkit node when at least one site exists.
+    # Before any site is created the node would be an empty phantom — the user
+    # expects the node to appear only after they add a site through the UI.
+    db = SessionLocal()
+    try:
+        has_sites = db.query(Site).first() is not None
+    finally:
+        db.close()
+
+    if not has_sites:
+        logger.debug("MTX Toolkit sync skipped: no sites configured yet")
+        return
+
     node_id = _ensure_mtx_toolkit_node()
     if not node_id:
         return

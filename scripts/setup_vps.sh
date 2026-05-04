@@ -135,39 +135,11 @@ if [ "$MTX_READY" -eq 0 ]; then
   warn "Fleet-server зарегистрирует ноду автоматически когда backend поднимется."
 fi
 
-# ── 6. Перезапустить fleet-server чтобы он подключился к MTX ─
-step "Синхронизация fleet-server с MTX Toolkit"
+# ── 6. Готово ───────────────────────────────────────────────
+step "Проверка связи fleet-server ↔ MTX Toolkit"
 
 if [ "$MTX_READY" -eq 1 ]; then
-  # fleet-server имеет sync loop — просто даём ему время
-  info "Жду автоматической регистрации ноды (до 15 сек)..."
-  sleep 10
-
-  # Проверяем что нода появилась
-  NODE_COUNT=$(curl -sf http://127.0.0.1:5002/api/fleet/nodes?active_only=false 2>/dev/null \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('nodes',[])))" 2>/dev/null || echo "0")
-
-  if [ "$NODE_COUNT" -gt 0 ]; then
-    ok "Нода MediaMTX автоматически зарегистрирована в Fleet!"
-  else
-    # Принудительная регистрация если sync loop не успел
-    info "Sync loop не успел — регистрирую ноду вручную..."
-    RTSP_PORT="${RTSP_PORT:-8554}"
-    curl -sf -X POST http://127.0.0.1:5002/api/fleet/nodes \
-      -H "Content-Type: application/json" \
-      -d "{
-        \"name\": \"MediaMTX ${PUBLIC_HOST}\",
-        \"api_url\": \"http://mediamtx-internal:${MEDIAMTX_INTERNAL_PASS}@host.docker.internal:9997\",
-        \"rtsp_url\": \"rtsp://viewer:${MEDIAMTX_VIEWER_PASS}@host.docker.internal:${RTSP_PORT}\",
-        \"environment\": \"production\",
-        \"is_active\": true
-      }" &>/dev/null || true
-
-    sleep 3
-    curl -sf -X POST http://127.0.0.1:5002/api/fleet/nodes/1/sync \
-      -H "Content-Type: application/json" -d "{}" &>/dev/null || true
-    ok "Нода зарегистрирована принудительно"
-  fi
+  ok "MTX Toolkit готов. Нода MediaMTX появится в Fleet автоматически после создания первой площадки в UI."
 fi
 
 # ── 7. SSL ───────────────────────────────────────────────────
